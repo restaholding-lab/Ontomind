@@ -27,7 +27,7 @@ async def embed_texto(texto: str) -> list[float]:
         r = await client.post(
             "https://api.openai.com/v1/embeddings",
             headers={
-                "Authorization": f"Bearer {OPENAI_API_KEY}",
+                "Authorization": "Bearer " + OPENAI_API_KEY.strip().replace(chr(10),"").replace(chr(13),""),
                 "Content-Type":  "application/json"
             },
             json={"model": EMBED_MODEL, "input": [texto]}

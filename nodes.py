@@ -59,7 +59,7 @@ async def llamar_llm(system: str, user: str,
         r = await client.post(
             "https://api.openai.com/v1/chat/completions",
             headers={
-                "Authorization": f"Bearer {OPENAI_API_KEY}",
+                "Authorization": "Bearer " + OPENAI_API_KEY.strip().replace(chr(10),"").replace(chr(13),""),
                 "Content-Type":  "application/json"
             },
             json={
