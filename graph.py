@@ -50,7 +50,7 @@ def construir_grafo() -> StateGraph:
     grafo.add_node("triple_filtro",     nodo_triple_filtro_vigil)
     grafo.add_node("prueba_fuego",      nodo_prueba_fuego)
     grafo.add_node("distinciones",      nodo_distinciones)
-    grafo.add_node("historial",         nodo_historial)
+    grafo.add_node("consultar_historial",         nodo_historial)
     grafo.add_node("maestro",           nodo_maestro)
     grafo.add_node("actualizar_memoria",nodo_actualizar_memoria)
 
@@ -84,8 +84,8 @@ def construir_grafo() -> StateGraph:
     )
 
     # Flujo final
-    grafo.add_edge("distinciones",       "historial")
-    grafo.add_edge("historial",          "maestro")
+    grafo.add_edge("distinciones", "consultar_historial")
+    grafo.add_edge("consultar_historial", "maestro")
     grafo.add_edge("maestro",            "actualizar_memoria")
     grafo.add_edge("actualizar_memoria", END)
 
