@@ -14,7 +14,7 @@ from prompts import (PROMPT_E_ACTOS, PROMPT_E_JUICIOS, PROMPT_P_QUIEBRE,
 from rag import recuperar_contexto, formatear_contexto
 from memory import mapa_observador, sesion_redis
 
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
 OPENAI_MODEL   = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 
 RESPUESTA_ANCORA = """Lo que describes me importa, y quiero estar presente en esto contigo.
