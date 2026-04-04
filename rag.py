@@ -8,7 +8,7 @@ from typing import Optional
 
 QDRANT_URL     = os.getenv("QDRANT_URL", "").rstrip("/")
 QDRANT_API_KEY = os.getenv("QDRANT_API_KEY", "").strip()
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
+OPENAI_API_KEY = "".join(os.getenv("OPENAI_API_KEY", "").split())
 EMBED_MODEL    = "text-embedding-3-small"
 
 # Mapa nodo → colección Qdrant
