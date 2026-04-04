@@ -141,6 +141,19 @@ async def get_mapa_observador(session_id: str):
     return {"session_id": session_id, "mapa": mapa}
 
 
+
+@app.get("/debug/env")
+async def debug_env():
+    import os
+    key = os.getenv("OPENAI_API_KEY", "NOT_SET")
+    return {
+        "key_length": len(key),
+        "key_start": key[:10] if len(key) > 10 else key,
+        "key_end": key[-5:] if len(key) > 5 else key,
+        "has_newline": chr(10) in key or chr(13) in key,
+        "stripped_length": len(key.strip()),
+    }
+
 if __name__ == "__main__":
     import uvicorn
     port = int(os.getenv("PORT", 8000))
