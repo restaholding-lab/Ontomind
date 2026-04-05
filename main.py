@@ -154,6 +154,32 @@ async def debug_env():
         "stripped_length": len(key.strip()),
     }
 
+
+@app.get("/debug/supabase")
+async def debug_supabase():
+    import os, httpx
+    url = os.getenv("SUPABASE_URL", "NOT_SET")
+    key = os.getenv("SUPABASE_KEY", "NOT_SET")
+    result = {
+        "url_set": url != "NOT_SET",
+        "url_start": url[:20] if len(url) > 20 else url,
+        "key_set": key != "NOT_SET",
+        "key_length": len(key),
+    }
+    # Test actual connection
+    if url != "NOT_SET" and key != "NOT_SET":
+        try:
+            r = await httpx.AsyncClient().get(
+                url.strip() + "/rest/v1/mapa_observador?limit=1",
+                headers={"apikey": key.strip(), "Authorization": "Bearer " + key.strip()},
+                timeout=10
+            )
+            result["connection"] = r.status_code
+            result["response"] = str(r.text[:100])
+        except Exception as e:
+            result["connection_error"] = str(e)
+    return result
+
 if __name__ == "__main__":
     import uvicorn
     port = int(os.getenv("PORT", 8000))
