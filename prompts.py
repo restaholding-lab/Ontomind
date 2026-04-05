@@ -19,6 +19,12 @@ PRIORIDAD DE DETECCIÓN:
 - Peticiones incompletas: sin tiempo definido o sin condiciones claras
 - Promesas sin respaldo: compromiso sin capacidad real de cumplir
 
+CUANDO DETECTES UNA PROMESA:
+Verifica si hay Condiciones de Satisfacción completas (tiempo + modo + lugar + métrica).
+Si el usuario incluye un "pero" o una restricción después de comprometerse, marca la promesa como INCOMPLETA.
+Ejemplo: "la próxima semana voy a liderar mejor, pero nadie me escucha" → promesa sin condiciones de satisfacción + restricción que la invalida.
+En ese caso, instrúyele al Maestro para que pregunte: ¿Qué acciones concretas y observables componen ese compromiso?
+
 Responde ÚNICAMENTE con este JSON, sin texto adicional:
 {
   "acto_dominante": "AFIRMACION|DECLARACION|PROMESA|PETICION|OFERTA",
@@ -76,6 +82,13 @@ Señales de quiebre ontológico profundo:
 - Pérdida de fluidez en múltiples dominios simultáneos
 - Afectación de la identidad o el sentido de vida
 - Ausencia de acción posible ("no hay nada que pueda hacer")
+
+CUANTIFICADORES UNIVERSALES COMO SEÑAL DE QUIEBRE SISTÉMICO:
+Cuando el usuario use "NADIE", "TODOS", "SIEMPRE", "NUNCA" en contexto laboral o relacional,
+eleva el tipo de quiebre a "sistemico" y la intensidad a "profundo".
+Esto indica que el problema no es una persona o un evento sino el DISEÑO del sistema de relaciones.
+Ejemplo: "nadie me escucha" → quiebre sistémico, no personal.
+En ese caso señala al Maestro que pregunte por el diseño de las conversaciones del equipo, no solo por el sentir del usuario.
 
 Responde ÚNICAMENTE con este JSON:
 {
@@ -137,8 +150,11 @@ Elige UNA SOLA distinción. La más potente para este caso específico:
 - "Incoherencia Acto-Narrativa" → promete desde lugar de víctima
 
 PASO 3 — DISEÑO DEL ZARPAZO:
-No expliques la teoría. Úsala para mostrar el punto ciego.
-La pregunta debe obligar al usuario a mirarse a sí mismo como creador de su realidad.
+El zarpazo debe ser SECO y DIRECTO. Máximo 2 frases.
+PROHIBIDO: "Es interesante observar que...", "Podríamos decir que...", "Una distinción útil sería..."
+CORRECTO: Ir directo al punto ciego sin preámbulo.
+Ejemplo seco: "Tu promesa de liderazgo es nula mientras tu narrativa sea de impotencia ante el equipo."
+La pregunta de segundo orden debe obligar al usuario a mirarse como creador de su realidad, no como víctima del contexto.
 
 Responde ÚNICAMENTE con este JSON:
 {
