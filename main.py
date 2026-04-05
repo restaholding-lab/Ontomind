@@ -180,6 +180,40 @@ async def debug_supabase():
             result["connection_error"] = str(e)
     return result
 
+
+@app.get("/admin/tabla/{tabla}")
+async def proxy_tabla(tabla: str, limit: int = 100, params: str = ""):
+    """Proxy para que el dashboard lea Supabase a traves del backend."""
+    import os, httpx
+    url  = os.getenv("SUPABASE_URL","").strip()
+    key  = os.getenv("SUPABASE_KEY","").strip()
+    if not url or not key:
+        return []
+    tablas_permitidas = {"log_nodos", "mapa_observador", "alertas_vigil"}
+    if tabla not in tablas_permitidas:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=403, detail="Tabla no permitida")
+    try:
+        query = f"{url}/rest/v1/{tabla}?{params}&limit={limit}"
+        async with httpx.AsyncClient(timeout=15) as client:
+            r = await client.get(query,
+                headers={"apikey": key, "Authorization": "Bearer " + key})
+        return r.json() if r.status_code == 200 else []
+    except Exception as e:
+        return {"error": str(e)}
+
+@app.patch("/admin/alertas_vigil/{alerta_id}")
+async def marcar_revisado(alerta_id: int):
+    import os, httpx
+    url = os.getenv("SUPABASE_URL","").strip()
+    key = os.getenv("SUPABASE_KEY","").strip()
+    async with httpx.AsyncClient(timeout=15) as client:
+        r = await client.patch(
+            f"{url}/rest/v1/alertas_vigil?id=eq.{alerta_id}",
+            headers={"apikey": key, "Authorization": "Bearer " + key, "Content-Type": "application/json"},
+            json={"revisado": True})
+    return {"ok": r.status_code in (200, 204)}
+
 if __name__ == "__main__":
     import uvicorn
     port = int(os.getenv("PORT", 8000))
