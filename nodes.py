@@ -208,6 +208,22 @@ async def nodo_triple_filtro_vigil(state: OntomindState) -> OntomindState:
             quiebre.get("osar_afectado") == "completo"):
         nivel = "alto"
 
+    # FAIL-SAFE: dominio vida|sentido + no_posibilidad alta = CRITICO directo
+    # No se hace coaching sobre falta de sentido vital sin red de seguridad humana
+    actos   = state["reporte_actos"]
+    dominio = quiebre.get("dominio_afectado", "")
+    conf_no_posibilidad = float(actos.get("confianza", 0)) if actos.get("tipo_alerta") == "no_posibilidad" else 0
+
+    dominios_criticos = {"sentido", "vida", "identidad", "multiple"}
+    if dominio in dominios_criticos and conf_no_posibilidad > 0.8:
+        nivel = "critico"
+
+    # Rechazo explicito de ayuda = señal de alto riesgo
+    tokens_rechazo = {"no quiero ayuda", "no me ayuden", "nadie me ayude",
+                      "dejame solo", "dejadme", "no quiero que nadie"}
+    if any(t in texto for t in tokens_rechazo):
+        nivel = "critico" if nivel == "alto" else "alto"
+
     state["nivel_riesgo"] = nivel
     return state
 
@@ -218,6 +234,16 @@ async def nodo_prueba_fuego(state: OntomindState) -> OntomindState:
     Paso A: Pregunta de Dominio.
     Paso B: Evalúa respuesta. Activa ANCORA si hay colapso.
     """
+    # FAIL-SAFE: si nivel ya es critico, saltar pregunta e ir directo a ANCORA
+    if state.get("nivel_riesgo") == "critico":
+        state["protocolo"] = "vigil"
+        import asyncio
+        asyncio.create_task(mapa_observador.registrar_alerta_vigil(
+            state["session_id"], "critico",
+            f"Colapso dominio vital. Input: {state['user_input'][:200]}"
+        ))
+        return state
+
     if not state.get("pregunta_dominio_hecha"):
         state["respuesta"] = (
             "Antes de seguir, quiero entenderte mejor.\n\n"
@@ -318,9 +344,19 @@ async def nodo_maestro(state: OntomindState) -> OntomindState:
     """Sintetiza el dictamen en respuesta conversacional."""
     protocolo = state["protocolo"]
 
-    # Protocolo VIGIL — respuesta directa sin LLM
+    # Protocolo VIGIL — usar el prompt especializado de anclaje
     if protocolo == "vigil":
-        state["respuesta"] = RESPUESTA_ANCORA
+        from prompts import PROMPT_VIGIL
+        contexto_vigil = (
+            f"INPUT DEL USUARIO: {state['user_input']}
+"
+            f"NIVEL DE RIESGO: {state.get('nivel_riesgo', 'critico')}
+"
+            f"DOMINIO AFECTADO: {state['reporte_quiebre'].get('dominio_afectado', '')}
+"
+            f"TOKENS DE RIESGO: {state['reporte_victima'].get('tokens_victima', [])}"
+        )
+        state["respuesta"] = await llamar_llm(PROMPT_VIGIL, contexto_vigil, temperatura=0.3)
         return state
 
     dictamen = state.get("dictamen", {})
