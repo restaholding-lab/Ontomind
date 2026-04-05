@@ -347,15 +347,11 @@ async def nodo_maestro(state: OntomindState) -> OntomindState:
     # Protocolo VIGIL — usar el prompt especializado de anclaje
     if protocolo == "vigil":
         from prompts import PROMPT_VIGIL
-        contexto_vigil = (
-            f"INPUT DEL USUARIO: {state['user_input']}
-"
-            f"NIVEL DE RIESGO: {state.get('nivel_riesgo', 'critico')}
-"
-            f"DOMINIO AFECTADO: {state['reporte_quiebre'].get('dominio_afectado', '')}
-"
-            f"TOKENS DE RIESGO: {state['reporte_victima'].get('tokens_victima', [])}"
-        )
+        ui = state.get("user_input", "")
+        nr = state.get("nivel_riesgo", "critico")
+        da = state["reporte_quiebre"].get("dominio_afectado", "")
+        tv = str(state["reporte_victima"].get("tokens_victima", []))
+        contexto_vigil = "INPUT: " + ui + " | RIESGO: " + nr + " | DOMINIO: " + da + " | TOKENS: " + tv
         state["respuesta"] = await llamar_llm(PROMPT_VIGIL, contexto_vigil, temperatura=0.3)
         return state
 
