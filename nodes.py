@@ -208,7 +208,24 @@ async def nodo_triple_filtro_vigil(state: OntomindState) -> OntomindState:
             quiebre.get("osar_afectado") == "completo"):
         nivel = "alto"
 
-    # FAIL-SAFE: dominio vida|sentido + no_posibilidad alta = CRITICO directo
+    # HARD-LOCK 1: dominio multiple/sentido/vida + victima > 0.8 = CRITICO sin pasar por DISTINCIONES
+    # El flujo hacia [DISTINCIONES] queda fisicamente desconectado
+    conf_victima_actual = float(state["reporte_victima"].get("confianza", 0))
+    dominios_colapso = {"sentido", "vida", "identidad", "multiple"}
+    dominio_actual = quiebre.get("dominio_afectado", "")
+    if dominio_actual in dominios_colapso and conf_victima_actual > 0.8:
+        nivel = "critico"
+
+    # HARD-LOCK 2: tokens de cierre explícitos = CRITICO inmediato
+    tokens_cierre = {
+        "no puedo mas", "no puedo más", "ya no puedo", "no tengo fuerzas",
+        "no me preguntes", "dejar constancia", "no quiero ayuda",
+        "nadie me ayude", "sin salida", "bucle sin salida", "no hay salida"
+    }
+    if any(t in texto for t in tokens_cierre):
+        nivel = "critico"
+
+    # FAIL-SAFE original: dominio vida|sentido + no_posibilidad alta = CRITICO directo
     # No se hace coaching sobre falta de sentido vital sin red de seguridad humana
     actos   = state["reporte_actos"]
     dominio = quiebre.get("dominio_afectado", "")
@@ -358,11 +375,26 @@ async def nodo_maestro(state: OntomindState) -> OntomindState:
     dictamen = state.get("dictamen", {})
     delta    = state.get("delta_observador", "estable")
 
+    # Detectar tokens de cierre que prohiben preguntas
+    tokens_cierre_txt = {
+        "no me preguntes", "no preguntes", "dejar constancia",
+        "no quiero que me pregunten", "sin preguntas"
+    }
+    prohibir_preguntas = any(t in state["user_input"].lower() for t in tokens_cierre_txt)
+    
+    instruccion_preguntas = (
+        "INSTRUCCION CRITICA: El usuario ha pedido explicitamente que NO le hagas preguntas. "
+        "PROHIBIDO usar el signo de interrogacion '?'. "
+        "Usa solo declaraciones de presencia y anclaje."
+        if prohibir_preguntas else ""
+    )
+
     contexto_maestro = (
         f"PROTOCOLO ACTIVO: {protocolo}\n"
         f"DELTA OBSERVADOR: {delta}\n"
         f"DICTAMEN DE [DISTINCIONES]:\n{json.dumps(dictamen, ensure_ascii=False)}\n\n"
-        f"MENSAJE ORIGINAL DEL USUARIO:\n{state['user_input']}"
+        f"MENSAJE ORIGINAL DEL USUARIO:\n{state['user_input']}\n\n"
+        f"{instruccion_preguntas}"
     )
 
     if delta == "transformacion":

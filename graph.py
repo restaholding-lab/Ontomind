@@ -28,8 +28,14 @@ def router_silencio(state: OntomindState) -> Literal["detectores", "distinciones
 
 
 def router_riesgo(state: OntomindState) -> Literal["prueba_fuego", "distinciones"]:
-    """Si hay riesgo alto, activa la Prueba de Fuego antes del Incisor."""
-    return "prueba_fuego" if state["nivel_riesgo"] == "alto" else "distinciones"
+    """
+    HARD-LOCK: si nivel es critico, va directo a prueba_fuego (que activa ANCORA).
+    Si es alto, pasa por prueba_fuego para verificar dominio.
+    Solo si es ninguno/latente va a distinciones para coaching normal.
+    """
+    if state["nivel_riesgo"] in ("alto", "critico"):
+        return "prueba_fuego"
+    return "distinciones"
 
 
 def router_prueba_fuego(state: OntomindState) -> Literal["maestro", "distinciones"]:
