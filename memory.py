@@ -1,7 +1,7 @@
 """
-memory.py — Memoria del sistema ONTOMIND
-- Supabase: Mapa del Observador (persistente entre sesiones)
-- Redis: estado de sesión actual (temporal)
+memory.py — Memoria del sistema ONTOMIND v2
+- Supabase: Mapa del Observador + Log de nodos por turno
+- Redis: estado de sesión actual
 """
 import os
 import json
@@ -13,28 +13,21 @@ SUPABASE_KEY = os.getenv("SUPABASE_KEY", "")
 REDIS_URL    = os.getenv("REDIS_URL", "")
 
 
-# ─── SUPABASE — Mapa del Observador ──────────────────────
 class MapaObservador:
-    """
-    Perfil dinámico del usuario en Supabase.
-    El presente siempre manda sobre el historial.
-    El historial es solo contraste, nunca sesgo.
-    """
-
     def __init__(self):
         self.headers = {
-            "apikey":        SUPABASE_KEY,
-            "Authorization": f"Bearer {SUPABASE_KEY}",
+            "apikey":        SUPABASE_KEY.strip(),
+            "Authorization": f"Bearer {SUPABASE_KEY.strip()}",
             "Content-Type":  "application/json",
             "Prefer":        "return=representation"
         }
 
-    async def _request(self, method: str, path: str, body=None) -> dict:
+    async def _request(self, method, path, body=None):
         import httpx
         async with httpx.AsyncClient(timeout=15) as client:
             r = await client.request(
                 method,
-                f"{SUPABASE_URL}/rest/v1/{path}",
+                f"{SUPABASE_URL.strip()}/rest/v1/{path}",
                 headers=self.headers,
                 json=body
             )
@@ -43,61 +36,39 @@ class MapaObservador:
                 return data[0] if isinstance(data, list) and data else data
             return {}
 
-    async def get(self, session_id: str) -> dict:
-        """Recupera el mapa del observador de un usuario."""
+    async def get(self, session_id):
         try:
-            data = await self._request(
-                "GET",
-                f"mapa_observador?session_id=eq.{session_id}&limit=1"
-            )
-            return data or self._mapa_vacio(session_id)
+            data = await self._request("GET",
+                f"mapa_observador?session_id=eq.{session_id}&limit=1")
+            return data or self._vacio(session_id)
         except Exception as e:
             print(f"[Supabase] Error get: {e}")
-            return self._mapa_vacio(session_id)
+            return self._vacio(session_id)
 
-    async def actualizar(self, session_id: str, datos_sesion: dict) -> bool:
-        """
-        Actualiza el mapa del observador con los datos de la sesión actual.
-        El presente es soberano — acumula sin sobrescribir el historial.
-        """
+    async def actualizar(self, session_id, datos):
         try:
-            mapa_actual = await self.get(session_id)
-            
-            # Acumular historial de posiciones
-            historial = mapa_actual.get("historial_posiciones", [])
+            mapa = await self.get(session_id)
+            historial = json.loads(mapa.get("historial_posiciones", "[]") or "[]")
             historial.append({
                 "fecha":     datetime.utcnow().isoformat(),
-                "posicion":  datos_sesion.get("posicion_victima", "desconocido"),
-                "protocolo": datos_sesion.get("protocolo", "normal"),
-                "delta":     datos_sesion.get("delta_observador", "estable")
+                "posicion":  datos.get("posicion_victima", "desconocido"),
+                "protocolo": datos.get("protocolo", "normal"),
+                "delta":     datos.get("delta_observador", "estable")
             })
-            # Mantener solo los últimos 50 registros
             historial = historial[-50:]
-
-            cuerpo = {
+            await self._request("POST", "mapa_observador", {
                 "session_id":           session_id,
-                "ultima_posicion":      datos_sesion.get("posicion_victima"),
-                "ultimo_quiebre":       datos_sesion.get("tipo_quiebre"),
-                "ancora_activado":      datos_sesion.get("ancora_activado", False),
-                "turnos_desde_ancora":  datos_sesion.get("turnos_desde_ancora", 0),
+                "ultima_posicion":      datos.get("posicion_victima"),
+                "ultimo_quiebre":       datos.get("tipo_quiebre"),
+                "ancora_activado":      datos.get("ancora_activado", False),
+                "turnos_desde_ancora":  datos.get("turnos_desde_ancora", 0),
                 "historial_posiciones": json.dumps(historial),
                 "updated_at":           datetime.utcnow().isoformat()
-            }
-
-            # Upsert — crea o actualiza
-            await self._request(
-                "POST",
-                "mapa_observador",
-                cuerpo
-            )
-            return True
+            })
         except Exception as e:
             print(f"[Supabase] Error actualizar: {e}")
-            return False
 
-    async def registrar_alerta_vigil(self, session_id: str,
-                                      nivel: str, mensaje: str) -> None:
-        """Log silencioso de alerta VIGIL para supervisores."""
+    async def registrar_alerta_vigil(self, session_id, nivel, mensaje):
         try:
             await self._request("POST", "alertas_vigil", {
                 "session_id": session_id,
@@ -108,7 +79,43 @@ class MapaObservador:
         except Exception as e:
             print(f"[Supabase] Error alerta VIGIL: {e}")
 
-    def _mapa_vacio(self, session_id: str) -> dict:
+    async def registrar_log_nodos(self, session_id, turno, estado):
+        """
+        Guarda el reporte completo de todos los nodos en cada turno.
+        Esta es la fuente de aprendizaje para el equipo supervisor.
+        """
+        try:
+            import httpx
+            async with httpx.AsyncClient(timeout=15) as client:
+                r = await client.post(
+                    f"{SUPABASE_URL.strip()}/rest/v1/log_nodos",
+                    headers={
+                        "apikey":        SUPABASE_KEY.strip(),
+                        "Authorization": f"Bearer {SUPABASE_KEY.strip()}",
+                        "Content-Type":  "application/json"
+                    },
+                    json={
+                        "session_id":      session_id,
+                        "turno":           turno,
+                        "timestamp":       datetime.utcnow().isoformat(),
+                        "user_input":      estado.get("user_input", ""),
+                        "protocolo":       estado.get("protocolo", "normal"),
+                        "reporte_actos":   estado.get("reporte_actos", {}),
+                        "reporte_juicios": estado.get("reporte_juicios", {}),
+                        "reporte_quiebre": estado.get("reporte_quiebre", {}),
+                        "reporte_victima": estado.get("reporte_victima", {}),
+                        "dictamen":        estado.get("dictamen", {}),
+                        "delta_observador":estado.get("delta_observador", "estable"),
+                        "respuesta":       estado.get("respuesta", ""),
+                        "nivel_riesgo":    estado.get("nivel_riesgo", "ninguno")
+                    }
+                )
+                if r.status_code not in (200, 201):
+                    print(f"[Supabase] Error log_nodos: {r.status_code} {r.text[:100]}")
+        except Exception as e:
+            print(f"[Supabase] Error registrar_log_nodos: {e}")
+
+    def _vacio(self, session_id):
         return {
             "session_id":           session_id,
             "ultima_posicion":      "desconocido",
@@ -119,22 +126,14 @@ class MapaObservador:
         }
 
 
-# ─── REDIS — Estado de sesión ─────────────────────────────
 class SesionRedis:
-    """
-    Estado temporal de la conversación actual.
-    Se borra cuando la sesión termina.
-    """
-
     def __init__(self):
-        self._cache: dict = {}  # fallback en memoria si Redis no está disponible
+        self._cache = {}
         self._redis = None
 
     async def _get_redis(self):
-        if self._redis:
-            return self._redis
-        if not REDIS_URL:
-            return None
+        if self._redis: return self._redis
+        if not REDIS_URL: return None
         try:
             import redis.asyncio as aioredis
             self._redis = await aioredis.from_url(REDIS_URL, decode_responses=True)
@@ -142,61 +141,53 @@ class SesionRedis:
         except Exception:
             return None
 
-    async def get(self, session_id: str) -> dict:
+    async def get(self, session_id):
         redis = await self._get_redis()
         if redis:
             try:
                 data = await redis.get(f"sesion:{session_id}")
-                return json.loads(data) if data else self._sesion_inicial()
+                return json.loads(data) if data else self._inicial()
             except Exception:
                 pass
-        return self._cache.get(session_id, self._sesion_inicial())
+        return self._cache.get(session_id, self._inicial())
 
-    async def set(self, session_id: str, estado: dict,
-                  ttl_segundos: int = 3600) -> None:
+    async def set(self, session_id, estado, ttl=3600):
         redis = await self._get_redis()
         if redis:
             try:
-                await redis.setex(
-                    f"sesion:{session_id}",
-                    ttl_segundos,
-                    json.dumps(estado)
-                )
+                await redis.setex(f"sesion:{session_id}", ttl, json.dumps(estado))
                 return
             except Exception:
                 pass
         self._cache[session_id] = estado
 
-    async def incrementar_turno(self, session_id: str) -> int:
+    async def incrementar_turno(self, session_id):
         estado = await self.get(session_id)
         estado["turno_actual"] = estado.get("turno_actual", 0) + 1
         await self.set(session_id, estado)
         return estado["turno_actual"]
 
-    async def agregar_mensaje(self, session_id: str,
-                               rol: str, contenido: str) -> None:
+    async def agregar_mensaje(self, session_id, rol, contenido):
         estado = await self.get(session_id)
-        mensajes = estado.get("mensajes", [])
-        mensajes.append({"rol": rol, "contenido": contenido})
-        mensajes = mensajes[-20:]  # últimos 20 mensajes
-        estado["mensajes"] = mensajes
+        msgs = estado.get("mensajes", [])
+        msgs.append({"rol": rol, "contenido": contenido})
+        estado["mensajes"] = msgs[-20:]
         await self.set(session_id, estado)
 
-    async def get_mensajes(self, session_id: str) -> list:
+    async def get_mensajes(self, session_id):
         estado = await self.get(session_id)
         return estado.get("mensajes", [])
 
-    def _sesion_inicial(self) -> dict:
+    def _inicial(self):
         return {
-            "turno_actual":           0,
-            "mensajes":               [],
+            "turno_actual": 0,
+            "mensajes": [],
             "confianza_victima_acum": 0,
             "pregunta_dominio_hecha": False,
-            "ancora_activado":        False,
-            "protocolo":              "normal"
+            "ancora_activado": False,
+            "protocolo": "normal"
         }
 
 
-# Instancias globales
 mapa_observador = MapaObservador()
 sesion_redis    = SesionRedis()

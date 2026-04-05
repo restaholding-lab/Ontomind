@@ -366,4 +366,10 @@ async def nodo_actualizar_memoria(state: OntomindState) -> OntomindState:
     await sesion_redis.agregar_mensaje(
         state["session_id"], "assistant", state["respuesta"]
     )
+    # Log completo de nodos para el dashboard de supervisores
+    await mapa_observador.registrar_log_nodos(
+        state["session_id"],
+        state["turno_actual"],
+        state
+    )
     return state
