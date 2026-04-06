@@ -10,7 +10,8 @@ from typing import TypedDict, Optional
 import httpx
 
 from prompts import (PROMPT_E_ACTOS, PROMPT_E_JUICIOS, PROMPT_P_QUIEBRE,
-                     PROMPT_P_VICTIMA, PROMPT_DISTINCIONES, PROMPT_MAESTRO)
+                     PROMPT_P_VICTIMA, PROMPT_DISTINCIONES, PROMPT_MAESTRO,
+                     CONTEXTO_RAIZ_ANTROPOLOGICA)
 from rag import recuperar_contexto, formatear_contexto
 from memory import mapa_observador, sesion_redis
 
@@ -404,8 +405,10 @@ async def nodo_maestro(state: OntomindState) -> OntomindState:
             "cambio en una frase antes de la pregunta."
         )
 
+    # Inyectar Raiz Antropologica como marco permanente del Maestro
+    prompt_maestro_enriquecido = PROMPT_MAESTRO + "\n\n" + CONTEXTO_RAIZ_ANTROPOLOGICA
     state["respuesta"] = await llamar_llm(
-        PROMPT_MAESTRO,
+        prompt_maestro_enriquecido,
         contexto_maestro,
         temperatura=0.6
     )
