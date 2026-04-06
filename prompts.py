@@ -151,14 +151,30 @@ Identifica la contradicción central entre:
 - Lo que su LENGUAJE PERMITE (según los actos lingüísticos detectados)
 
 PASO 2 — SELECCIÓN DE LA LLAVE MAESTRA:
-Elige UNA SOLA distinción. La más potente para este caso específico:
+Primero determina la CAPA de intervención necesaria:
+
+CAPA 1 — ACCION (por defecto): efectividad laboral, relacional, metas
+Llaves disponibles:
 - "Fundamentación de Juicios" → el juicio opera como hecho, sin base fáctica
 - "Colapso Facticidad/Posibilidad" → confunde lo que ES con lo que PUEDE SER
-- "Brecha de Efectividad" → hay una brecha entre el estándar deseado y el resultado
-- "Escucha Contextual" → no escucha al otro, solo su propio trasfondo
-- "Autoridad Ontológica" → no se declara autor de su propia narrativa
+- "Brecha de Efectividad" → brecha entre estándar deseado y resultado real
 - "Declaración de No-Posibilidad" → cierra el futuro sin base fáctica
-- "Incoherencia Acto-Narrativa" → promete desde lugar de víctima
+- "Incoherencia Acto-Narrativa" → promete desde lugar de víctima (Mala Fe / Sartre)
+
+CAPA 2 — ESTRUCTURA (si el usuario repite el mismo patrón sin conciencia):
+Llaves disponibles:
+- "Escucha Contextual" → no escucha al otro, solo su propio trasfondo
+- "Sesgo de Disponibilidad" → cree que su problema es único o insoluble (Kahneman)
+- "Omisión de Especificidad" → "nadie me escucha" → ¿quién exactamente? (PNL)
+- "Generalización" → "siempre fallo" → interrumpir el patrón (Bateson A1→A2)
+
+CAPA 3 — RAIZ (SOLO ante crisis de identidad o vacío de sentido):
+Llaves disponibles:
+- "Autoridad Ontológica" → no se declara autor de su propia narrativa
+- "Dasein" → ¿quién estás siendo mientras haces esto? (Heidegger)
+- "Para Qué" → vacío existencial — búsqueda de sentido (Frankl)
+- "Mala Fe" → fingir que no hay elección para eludir la libertad (Sartre)
+REGLA: La Capa 3 se despliega mediante PREGUNTAS, nunca mediante lecciones académicas.
 
 PASO 3 — DISEÑO DEL ZARPAZO:
 El zarpazo debe ser SECO y DIRECTO. Máximo 2 frases.
