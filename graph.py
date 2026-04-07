@@ -93,7 +93,9 @@ def construir_grafo() -> StateGraph:
     # Flujo final
     grafo.add_edge("distinciones", "consultar_historial")
     grafo.add_edge("consultar_historial", "maestro")
-    grafo.add_edge("maestro",            "actualizar_memoria")
+    grafo.add_node("evaluador",          nodo_evaluador)
+    grafo.add_edge("maestro",            "evaluador")
+    grafo.add_edge("evaluador",          "actualizar_memoria")
     grafo.add_edge("actualizar_memoria", END)
 
     return grafo.compile()
