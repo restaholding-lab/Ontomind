@@ -432,12 +432,23 @@ async def nodo_evaluador(state: OntomindState) -> OntomindState:
             protocolo=state.get("protocolo", "normal")
         )
         eval_raw = await llamar_llm(prompt_eval, "", temperatura=0.1)
-        # Limpiar posibles markdown fences
+        # Limpiar markdown fences y extraer JSON
         eval_clean = eval_raw.strip()
-        if eval_clean.startswith("```"):
-            eval_clean = eval_clean.split("```")[1]
-            if eval_clean.startswith("json"):
-                eval_clean = eval_clean[4:]
+        # Eliminar ```json ... ``` o ``` ... ```
+        if "```" in eval_clean:
+            parts = eval_clean.split("```")
+            for part in parts:
+                part = part.strip()
+                if part.startswith("json"):
+                    part = part[4:].strip()
+                if part.startswith("{"):
+                    eval_clean = part
+                    break
+        # Extraer solo el bloque JSON si hay texto antes o después
+        start = eval_clean.find("{")
+        end   = eval_clean.rfind("}") + 1
+        if start >= 0 and end > start:
+            eval_clean = eval_clean[start:end]
         evaluacion = _json.loads(eval_clean.strip())
         state["evaluacion"] = evaluacion
         print(f"[EVALUADOR] Score: {evaluacion.get('score_total', 0)}/40 | {evaluacion.get('nota_evaluador', '')}")
