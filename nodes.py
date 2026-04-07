@@ -51,6 +51,7 @@ class OntomindState(TypedDict):
     en_resguardo:            bool
     ancora_previo:           bool
     respuesta:               str
+    evaluacion:              dict       # metricas de recompensa antropologica
 
 
 # ─── Llamada LLM genérica ────────────────────────────────
