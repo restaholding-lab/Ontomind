@@ -11,7 +11,7 @@ import httpx
 
 from prompts import (PROMPT_E_ACTOS, PROMPT_E_JUICIOS, PROMPT_P_QUIEBRE,
                      PROMPT_P_VICTIMA, PROMPT_DISTINCIONES, PROMPT_MAESTRO,
-                     CONTEXTO_RAIZ_ANTROPOLOGICA)
+                     CONTEXTO_RAIZ_ANTROPOLOGICA, PROMPT_EVALUADOR)
 from rag import recuperar_contexto, formatear_contexto
 from memory import mapa_observador, sesion_redis
 
@@ -416,6 +416,40 @@ async def nodo_maestro(state: OntomindState) -> OntomindState:
 
 
 # ─── NODO 9: Actualizar Memoria ──────────────────────────
+
+async def nodo_evaluador(state: OntomindState) -> OntomindState:
+    """
+    Nodo silencioso de Recompensa Antropológica.
+    Evalúa la respuesta del Maestro según 4 métricas.
+    No modifica la respuesta — solo registra la evaluación.
+    """
+    import json as _json
+    try:
+        prompt_eval = PROMPT_EVALUADOR.format(
+            user_input=state.get("user_input", ""),
+            respuesta_maestro=state.get("respuesta", ""),
+            protocolo=state.get("protocolo", "normal")
+        )
+        eval_raw = await llamar_llm(prompt_eval, "", temperatura=0.1)
+        # Limpiar posibles markdown fences
+        eval_clean = eval_raw.strip()
+        if eval_clean.startswith("```"):
+            eval_clean = eval_clean.split("```")[1]
+            if eval_clean.startswith("json"):
+                eval_clean = eval_clean[4:]
+        evaluacion = _json.loads(eval_clean.strip())
+        state["evaluacion"] = evaluacion
+        print(f"[EVALUADOR] Score: {evaluacion.get('score_total', 0)}/40 | {evaluacion.get('nota_evaluador', '')}")
+    except Exception as e:
+        print(f"[EVALUADOR] Error: {e}")
+        state["evaluacion"] = {
+            "persistencia": 0, "escucha_sombras": 0,
+            "voz_supervivencia": 0, "hacia_declaracion": 0,
+            "arrogancia_intelectual": False, "score_total": 0,
+            "nota_evaluador": f"Error de evaluacion: {str(e)[:50]}"
+        }
+    return state
+
 async def nodo_actualizar_memoria(state: OntomindState) -> OntomindState:
     """Guarda el estado de la sesión en Supabase y Redis."""
     datos = {
@@ -439,4 +473,9 @@ async def nodo_actualizar_memoria(state: OntomindState) -> OntomindState:
         state["turno_actual"],
         state
     )
+    # Guardar evaluacion por separado si existe
+    if state.get("evaluacion"):
+        await mapa_observador.guardar_evaluacion(
+            state["session_id"], state["turno_actual"], state["evaluacion"]
+        )
     return state

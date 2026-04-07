@@ -115,6 +115,27 @@ class MapaObservador:
         except Exception as e:
             print(f"[Supabase] Error registrar_log_nodos: {e}")
 
+    async def guardar_evaluacion(self, session_id: str, turno: int, evaluacion: dict):
+        """Actualiza el campo evaluacion en log_nodos para este turno."""
+        try:
+            import httpx, json
+            url = SUPABASE_URL.strip()
+            key = SUPABASE_KEY.strip()
+            async with httpx.AsyncClient(timeout=15) as client:
+                r = await client.patch(
+                    f"{url}/rest/v1/log_nodos?session_id=eq.{session_id}&turno=eq.{turno}",
+                    headers={
+                        "apikey": key,
+                        "Authorization": "Bearer " + key,
+                        "Content-Type": "application/json"
+                    },
+                    json={"evaluacion": evaluacion}
+                )
+                if r.status_code not in (200, 204):
+                    print(f"[Supabase] Error guardar_evaluacion: {r.status_code}")
+        except Exception as e:
+            print(f"[Supabase] Error guardar_evaluacion: {e}")
+
     def _vacio(self, session_id):
         return {
             "session_id":           session_id,

@@ -16,6 +16,7 @@ from nodes import (
     nodo_distinciones,
     nodo_historial,
     nodo_maestro,
+    nodo_evaluador,
     nodo_actualizar_memoria,
 )
 
