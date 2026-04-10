@@ -430,23 +430,30 @@ async def nodo_evaluador(state: OntomindState) -> OntomindState:
             "Evalua esta respuesta de coaching ontologico.\n"
             "Usuario dijo: " + state.get("user_input", "") + "\n"
             "Respuesta del coach: " + state.get("respuesta", "") + "\n\n"
-            "Responde SOLO con numeros separados por coma en este orden:\n"
-            "persistencia(0-10), escucha_sombras(0-10), voz_supervivencia(0-10), hacia_declaracion(0-10), arrogancia_intelectual(0=no/1=si), nota_breve\n"
-            "Ejemplo: 7,5,8,6,0,Buen zarpazo pero falta calidez"
+            "METRICAS (responde SOLO numeros separados por coma en este orden):\n"
+            "1. escucha_sombras 0-15: ¿Valido la emocion real ANTES de cualquier distincion? ¿El usuario se siente visto?\n"
+            "2. voz_supervivencia 0-10: ¿Nombro la Voz de Supervivencia como duda compartida con calidez?\n"
+            "3. persistencia 0-10: ¿Prolonga el espacio de reflexion o cierra el tema?\n"
+            "4. hacia_declaracion 0-5: ¿La pregunta final invita a declarar una nueva forma de ser?\n"
+            "5. arrogancia_intelectual 0=no/1=si: ¿Uso 'narrativa', 'saboteando', 'Te invito a reflexionar', 'Es posible que no te des cuenta', 'Hay una contradiccion central'?\n"
+            "6. nota_breve: una frase corta\n"
+            "Ejemplo: 12,7,8,4,0,Validacion calida y pregunta humilde efectiva"
         )
         raw = await llamar_llm(prompt, "", temperatura=0.1)
         raw = raw.strip().replace("\n", " ")
         parts = raw.split(",", 5)
-        def safe_int(v, default=0):
-            try: return max(0, min(10, int(str(v).strip())))
+        def safe_int(v, default=0, max_val=10):
+            try: return max(0, min(max_val, int(str(v).strip())))
             except: return default
-        p  = safe_int(parts[0] if len(parts)>0 else 0)
-        es = safe_int(parts[1] if len(parts)>1 else 0)
-        vs = safe_int(parts[2] if len(parts)>2 else 0)
-        hd = safe_int(parts[3] if len(parts)>3 else 0)
+        # Nuevo orden: escucha_sombras(0-15), voz_supervivencia(0-10), persistencia(0-10), hacia_declaracion(0-5), arrogancia, nota
+        es = safe_int(parts[0] if len(parts)>0 else 0, max_val=15)
+        vs = safe_int(parts[1] if len(parts)>1 else 0)
+        p  = safe_int(parts[2] if len(parts)>2 else 0)
+        hd = safe_int(parts[3] if len(parts)>3 else 0, max_val=5)
         arrog = str(parts[4]).strip() == "1" if len(parts)>4 else False
         nota  = str(parts[5]).strip() if len(parts)>5 else "Sin nota"
-        total = p + es + vs + hd - (10 if arrog else 0)
+        # Penalizacion de arrogancia: -20 puntos (antes era -10)
+        total = es + vs + p + hd - (20 if arrog else 0)
         state["evaluacion"] = {
             "persistencia": p, "escucha_sombras": es,
             "voz_supervivencia": vs, "hacia_declaracion": hd,
@@ -454,7 +461,7 @@ async def nodo_evaluador(state: OntomindState) -> OntomindState:
             "score_total": max(0, total),
             "nota_evaluador": nota
         }
-        print(f"[EVALUADOR] Score: {max(0,total)}/40 | {nota}")
+        print(f"[EVALUADOR] Score: {max(0,total)}/40 | ArroganciaI: {arrog} | {nota}")
     except Exception as e:
         print(f"[EVALUADOR] Error: {e}")
         state["evaluacion"] = {
