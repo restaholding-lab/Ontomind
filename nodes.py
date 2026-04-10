@@ -432,24 +432,29 @@ async def nodo_evaluador(state: OntomindState) -> OntomindState:
             protocolo=state.get("protocolo", "normal")
         )
         eval_raw = await llamar_llm(prompt_eval, "", temperatura=0.1)
-        # Limpiar markdown fences y extraer JSON
-        eval_clean = eval_raw.strip()
-        # Eliminar ```json ... ``` o ``` ... ```
-        if "```" in eval_clean:
-            parts = eval_clean.split("```")
-            for part in parts:
-                part = part.strip()
-                if part.startswith("json"):
-                    part = part[4:].strip()
-                if part.startswith("{"):
-                    eval_clean = part
-                    break
-        # Extraer solo el bloque JSON si hay texto antes o después
-        start = eval_clean.find("{")
-        end   = eval_clean.rfind("}") + 1
-        if start >= 0 and end > start:
-            eval_clean = eval_clean[start:end]
-        evaluacion = _json.loads(eval_clean.strip())
+        # Parser robusto: buscar { ... } en cualquier formato
+        import re as _re
+        match = _re.search(r'[{][^{}]*[}]', eval_raw, _re.DOTALL)
+        if match:
+            evaluacion = _json.loads(match.group())
+        else:
+            # Construir manualmente desde los valores encontrados
+            def extract(key):
+                m = _re.search(key + r'["\s:]+(\d+)', eval_raw)
+                return int(m.group(1)) if m else 0
+            arrog = "true" in eval_raw.lower() and "arrogancia" in eval_raw.lower()
+            p  = extract("persistencia")
+            es = extract("escucha_sombras")
+            vs = extract("voz_supervivencia")
+            hd = extract("hacia_declaracion")
+            total = p + es + vs + hd - (10 if arrog else 0)
+            evaluacion = {
+                "persistencia": p, "escucha_sombras": es,
+                "voz_supervivencia": vs, "hacia_declaracion": hd,
+                "arrogancia_intelectual": arrog,
+                "score_total": max(0, total),
+                "nota_evaluador": "Parseado por extraccion directa"
+            }
         state["evaluacion"] = evaluacion
         print(f"[EVALUADOR] Score: {evaluacion.get('score_total', 0)}/40 | {evaluacion.get('nota_evaluador', '')}")
     except Exception as e:
