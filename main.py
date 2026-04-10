@@ -33,6 +33,7 @@ app.add_middleware(
 class MensajeRequest(BaseModel):
     session_id: str
     mensaje:    str
+    user_code:  str = "anonimo"
 
 class MensajeResponse(BaseModel):
     session_id:  str
