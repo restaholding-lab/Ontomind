@@ -100,7 +100,9 @@ async def chat(request: MensajeRequest):
         "umbral_vigil":           0.70,
         "en_resguardo":           False,
         "ancora_previo":          False,
-        "respuesta":              ""
+        "respuesta":              "",
+        "evaluacion":             {},
+        "user_code":              request.user_code
     }
 
     # Ejecutar el grafo

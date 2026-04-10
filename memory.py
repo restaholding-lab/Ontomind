@@ -98,6 +98,7 @@ class MapaObservador:
                         "session_id":      session_id,
                         "turno":           turno,
                         "timestamp":       datetime.utcnow().isoformat(),
+                        "user_code":       estado.get("user_code", "anonimo"),
                         "user_input":      estado.get("user_input", ""),
                         "protocolo":       estado.get("protocolo", "normal"),
                         "reporte_actos":   estado.get("reporte_actos", {}),
@@ -135,6 +136,41 @@ class MapaObservador:
                     print(f"[Supabase] Error guardar_evaluacion: {r.status_code}")
         except Exception as e:
             print(f"[Supabase] Error guardar_evaluacion: {e}")
+
+    async def upsert_usuario(self, user_code: str, session_id: str):
+        """Registra o actualiza el usuario por código."""
+        try:
+            import httpx
+            url = SUPABASE_URL.strip()
+            key = SUPABASE_KEY.strip()
+            # Upsert usuario
+            async with httpx.AsyncClient(timeout=15) as client:
+                await client.post(
+                    f"{url}/rest/v1/usuarios",
+                    headers={
+                        "apikey": key,
+                        "Authorization": "Bearer " + key,
+                        "Content-Type": "application/json",
+                        "Prefer": "resolution=merge-duplicates"
+                    },
+                    json={
+                        "user_code":    user_code,
+                        "ultima_sesion": datetime.utcnow().isoformat(),
+                        "updated_at":   datetime.utcnow().isoformat()
+                    }
+                )
+                # Incrementar total_sesiones
+                await client.rpc(
+                    f"{url}/rest/v1/rpc/incrementar_sesiones",
+                    headers={
+                        "apikey": key,
+                        "Authorization": "Bearer " + key,
+                        "Content-Type": "application/json"
+                    },
+                    json={"p_user_code": user_code}
+                )
+        except Exception as e:
+            print(f"[Supabase] Error upsert_usuario: {e}")
 
     def _vacio(self, session_id):
         return {

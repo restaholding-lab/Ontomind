@@ -52,6 +52,7 @@ class OntomindState(TypedDict):
     ancora_previo:           bool
     respuesta:               str
     evaluacion:              dict       # metricas de recompensa antropologica
+    user_code:               str        # codigo de usuario persistente
 
 
 # ─── Llamada LLM genérica ────────────────────────────────
