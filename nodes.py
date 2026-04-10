@@ -420,62 +420,50 @@ async def nodo_maestro(state: OntomindState) -> OntomindState:
 
 async def nodo_evaluador(state: OntomindState) -> OntomindState:
     """
-    Nodo silencioso de Recompensa Antropológica.
-    Evalúa la respuesta del Maestro según 4 métricas.
-    No modifica la respuesta — solo registra la evaluación.
+    Nodo silencioso de Recompensa Antropologica.
+    Evalua la respuesta del Maestro con 4 metricas.
     """
-    import json as _json
+    import re as re2
     try:
-        prompt_eval = PROMPT_EVALUADOR.format(
-            user_input=state.get("user_input", ""),
-            respuesta_maestro=state.get("respuesta", ""),
-            protocolo=state.get("protocolo", "normal")
+        prompt = (
+            "Evalua esta respuesta de coaching ontologico.\n"
+            "Usuario dijo: " + state.get("user_input", "") + "\n"
+            "Respuesta del coach: " + state.get("respuesta", "") + "\n\n"
+            "Responde SOLO con numeros separados por coma en este orden:\n"
+            "persistencia(0-10), escucha_sombras(0-10), voz_supervivencia(0-10), hacia_declaracion(0-10), arrogancia_intelectual(0=no/1=si), nota_breve\n"
+            "Ejemplo: 7,5,8,6,0,Buen zarpazo pero falta calidez"
         )
-        eval_raw = await llamar_llm(prompt_eval, "", temperatura=0.1)
-        # Parser robusto: extraer valores directamente con regex
-        import re as _re
-
-        def _extract_int(key, text):
-            m = _re.search(key + r'[^\d]*(\d+)', text)
-            return int(m.group(1)) if m else 0
-
-        def _extract_bool(key, text):
-            m = _re.search(key + r'[^:]*:\s*(true|false)', text, _re.IGNORECASE)
-            return m.group(1).lower() == "true" if m else False
-
-        def _extract_str(key, text):
-            m = _re.search(key + r'[^:]*:\s*"([^"]*)"', text)
-            return m.group(1) if m else ""
-
-        p  = _extract_int("persistencia", eval_raw)
-        es = _extract_int("escucha_sombras", eval_raw)
-        vs = _extract_int("voz_supervivencia", eval_raw)
-        hd = _extract_int("hacia_declaracion", eval_raw)
-        st = _extract_int("score_total", eval_raw)
-        arrog = _extract_bool("arrogancia_intelectual", eval_raw)
-        nota  = _extract_str("nota_evaluador", eval_raw)
-
-        if st == 0:
-            st = p + es + vs + hd - (10 if arrog else 0)
-
-        evaluacion = {
+        raw = await llamar_llm(prompt, "", temperatura=0.1)
+        raw = raw.strip().replace("\n", " ")
+        parts = raw.split(",", 5)
+        def safe_int(v, default=0):
+            try: return max(0, min(10, int(str(v).strip())))
+            except: return default
+        p  = safe_int(parts[0] if len(parts)>0 else 0)
+        es = safe_int(parts[1] if len(parts)>1 else 0)
+        vs = safe_int(parts[2] if len(parts)>2 else 0)
+        hd = safe_int(parts[3] if len(parts)>3 else 0)
+        arrog = str(parts[4]).strip() == "1" if len(parts)>4 else False
+        nota  = str(parts[5]).strip() if len(parts)>5 else "Sin nota"
+        total = p + es + vs + hd - (10 if arrog else 0)
+        state["evaluacion"] = {
             "persistencia": p, "escucha_sombras": es,
             "voz_supervivencia": vs, "hacia_declaracion": hd,
             "arrogancia_intelectual": arrog,
-            "score_total": max(0, st),
-            "nota_evaluador": nota or "Sin nota"
+            "score_total": max(0, total),
+            "nota_evaluador": nota
         }
-        state["evaluacion"] = evaluacion
-        print(f"[EVALUADOR] Score: {evaluacion.get('score_total', 0)}/40 | {evaluacion.get('nota_evaluador', '')}")
+        print(f"[EVALUADOR] Score: {max(0,total)}/40 | {nota}")
     except Exception as e:
         print(f"[EVALUADOR] Error: {e}")
         state["evaluacion"] = {
             "persistencia": 0, "escucha_sombras": 0,
             "voz_supervivencia": 0, "hacia_declaracion": 0,
             "arrogancia_intelectual": False, "score_total": 0,
-            "nota_evaluador": f"Error de evaluacion: {str(e)[:50]}"
+            "nota_evaluador": f"Error: {str(e)[:50]}"
         }
     return state
+
 
 async def nodo_actualizar_memoria(state: OntomindState) -> OntomindState:
     """Guarda el estado de la sesión en Supabase y Redis."""
