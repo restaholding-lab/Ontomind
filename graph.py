@@ -17,6 +17,7 @@ from nodes import (
     nodo_historial,
     nodo_maestro,
     nodo_evaluador,
+    nodo_evaluador_conversacion,
     nodo_actualizar_memoria,
 )
 
@@ -94,8 +95,10 @@ def construir_grafo() -> StateGraph:
     grafo.add_edge("distinciones", "consultar_historial")
     grafo.add_edge("consultar_historial", "maestro")
     grafo.add_node("evaluador",          nodo_evaluador)
+    grafo.add_node("eval_conversacion",  nodo_evaluador_conversacion)
     grafo.add_edge("maestro",            "evaluador")
-    grafo.add_edge("evaluador",          "actualizar_memoria")
+    grafo.add_edge("evaluador",          "eval_conversacion")
+    grafo.add_edge("eval_conversacion",  "actualizar_memoria")
     grafo.add_edge("actualizar_memoria", END)
 
     return grafo.compile()

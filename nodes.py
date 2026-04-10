@@ -11,7 +11,8 @@ import httpx
 
 from prompts import (PROMPT_E_ACTOS, PROMPT_E_JUICIOS, PROMPT_P_QUIEBRE,
                      PROMPT_P_VICTIMA, PROMPT_DISTINCIONES, PROMPT_MAESTRO,
-                     CONTEXTO_RAIZ_ANTROPOLOGICA, PROMPT_EVALUADOR)
+                     CONTEXTO_RAIZ_ANTROPOLOGICA, PROMPT_EVALUADOR,
+                     PROMPT_EVALUADOR_CONVERSACION)
 from rag import recuperar_contexto, formatear_contexto
 from memory import mapa_observador, sesion_redis
 
@@ -52,6 +53,7 @@ class OntomindState(TypedDict):
     ancora_previo:           bool
     respuesta:               str
     evaluacion:              dict       # metricas de recompensa antropologica
+    evaluacion_conversacion: dict       # score 0-100 eje de transformacion
     user_code:               str        # codigo de usuario persistente
 
 
@@ -473,6 +475,81 @@ async def nodo_evaluador(state: OntomindState) -> OntomindState:
     return state
 
 
+
+async def nodo_evaluador_conversacion(state: OntomindState) -> OntomindState:
+    """
+    Evalúa el arco completo de la conversación tras cada turno.
+    Score 0-100 según el Eje de Transformación del observador.
+    """
+    try:
+        # Recuperar historial completo de la sesión
+        mensajes = await sesion_redis.get_mensajes(state["session_id"])
+        if not mensajes:
+            return state
+
+        # Construir resumen del historial
+        historial_txt = ""
+        for i, msg in enumerate(mensajes):
+            rol = "Usuario" if msg["rol"] == "user" else "ONTOMIND"
+            contenido_corto = msg['contenido'][:300]
+            historial_txt += f"[Turno {i//2 + 1}] {rol}: {contenido_corto}\n"
+
+        # Resumir reportes acumulados desde Redis
+        sesion = await sesion_redis.get(state["session_id"])
+        pos = sesion.get("ultima_posicion", "desconocido")
+        t_actual = state.get("turno_actual", 1)
+        n_riesgo = state.get("nivel_riesgo", "ninguno")
+        proto = state.get("protocolo", "normal")
+        llave = state.get("dictamen", {}).get("llave_maestra", "desconocido")
+        delta = state.get("delta_observador", "estable")
+        reportes_txt = (
+            "Posicion P-VICTIMA: " + pos + "\n"
+            + "Turno actual: " + str(t_actual) + "\n"
+            + "Nivel riesgo: " + n_riesgo + "\n"
+            + "Protocolo: " + proto + "\n"
+            + "Llave maestra: " + llave + "\n"
+            + "Delta observador: " + delta
+        )
+
+        prompt = PROMPT_EVALUADOR_CONVERSACION.format(
+            historial=historial_txt,
+            reportes_acumulados=reportes_txt
+        )
+
+        raw = await llamar_llm(prompt, "", temperatura=0.2)
+        raw = raw.strip().replace("\n", " ")
+        parts = raw.split("|", 10)
+
+        def sp(i, default=""): return str(parts[i]).strip() if len(parts) > i else default
+        def si(i, default=0):
+            try: return max(0, min(100, int(sp(i, str(default)))))
+            except: return default
+
+        datos = {
+            "total_turnos":            state.get("turno_actual", 1),
+            "posicion_inicial":        sp(0, "victima"),
+            "posicion_final":          sp(1, "victima"),
+            "arco_detectado":          sp(2, "estable"),
+            "score_transformacion":    si(3, 10),
+            "turno_quiebre":           si(4, 0),
+            "declaracion_detectada":   sp(5, "no").lower() == "si",
+            "declaracion_texto":       sp(6, ""),
+            "llave_maestra_dominante": sp(7, ""),
+            "nivel_riesgo_max":        sp(8, "ninguno"),
+            "dictamen_conversacion":   sp(9, ""),
+            "recomendacion":           sp(10, ""),
+            "protocolo_dominante":     state.get("protocolo", "normal"),
+        }
+
+        state["evaluacion_conversacion"] = datos
+        print(f"[EVAL-CONV] Score: {datos['score_transformacion']}/100 | Arco: {datos['arco_detectado']} | {datos['dictamen_conversacion'][:60]}")
+
+    except Exception as e:
+        print(f"[EVAL-CONV] Error: {e}")
+        state["evaluacion_conversacion"] = {"score_transformacion": 0, "arco_detectado": "estable"}
+
+    return state
+
 async def nodo_actualizar_memoria(state: OntomindState) -> OntomindState:
     """Guarda el estado de la sesión en Supabase y Redis."""
     datos = {
@@ -500,5 +577,10 @@ async def nodo_actualizar_memoria(state: OntomindState) -> OntomindState:
     if state.get("evaluacion"):
         await mapa_observador.guardar_evaluacion(
             state["session_id"], state["turno_actual"], state["evaluacion"]
+        )
+    if state.get("evaluacion_conversacion"):
+        await mapa_observador.guardar_evaluacion_conversacion(
+            state["session_id"], state.get("user_code","anonimo"),
+            state["evaluacion_conversacion"]
         )
     return state

@@ -192,7 +192,7 @@ async def proxy_tabla(tabla: str, limit: int = 100, params: str = ""):
     key  = os.getenv("SUPABASE_KEY","").strip()
     if not url or not key:
         return []
-    tablas_permitidas = {"log_nodos", "mapa_observador", "alertas_vigil"}
+    tablas_permitidas = {"log_nodos", "mapa_observador", "alertas_vigil", "evaluaciones_conversacion", "usuarios"}
     if tabla not in tablas_permitidas:
         from fastapi import HTTPException
         raise HTTPException(status_code=403, detail="Tabla no permitida")

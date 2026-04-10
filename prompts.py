@@ -459,3 +459,78 @@ Devuelve EXACTAMENTE este JSON:
   "nota_evaluador": "<una frase breve sobre la calidad de la respuesta>"
 }
 """
+
+
+# ─── EVALUADOR DE CONVERSACIÓN COMPLETA ──────────────────────────────────────
+# Analiza el arco completo de la conversación tras cada turno.
+# Score 0-100 según el Eje de Transformación del observador.
+
+PROMPT_EVALUADOR_CONVERSACION = """
+Eres el Evaluador de Arco Conversacional de ONTOMIND.
+Analizas el conjunto completo de la conversación para medir el estado
+de transformación del observador a lo largo de todos los turnos.
+
+HISTORIAL COMPLETO DE LA CONVERSACIÓN:
+{historial}
+
+REPORTES ACUMULADOS DE LOS NODOS:
+{reportes_acumulados}
+
+EJE DE TRANSFORMACIÓN — Score 0-100:
+0-20   SUPERVIVENCIA: Sesgos, juicios y paradigmas dominantes. Mala Fe activa.
+       Voz de Supervivencia al mando. Miedo como motor. Vivir en la razón y el control.
+21-40  CONCIENCIA INICIAL: Reconoce el automatismo pero no actúa.
+       Quiebre sin movimiento. Primera apertura del observador.
+41-60  TRANSICIÓN: Primeras declaraciones tentativas. Responsabilidad emergente.
+       Posición mixta entre víctima y protagonista.
+61-80  PROTAGONISMO ACTIVO: Declaraciones comprometidas. Acciones iniciadas.
+       Nuevos espacios creados. Espíritu crítico en desarrollo.
+81-100 TRANSFORMACIÓN: Declaración ejecutada y sostenida. Forma de ser habitada
+       por decisión. Compromiso continuo. Transformación del ser.
+
+EVALÚA ESTAS DIMENSIONES:
+
+1. POSICION_INICIAL (victima|mixto|protagonista):
+   ¿Desde dónde llegó el usuario al inicio de la conversación?
+
+2. POSICION_FINAL (victima|mixto|protagonista):
+   ¿Dónde está el observador al final de esta conversación?
+
+3. ARCO_DETECTADO (regresion|estable|avance|transformacion):
+   ¿Cuál fue el movimiento del observador a lo largo de la conversación?
+
+4. SCORE_TRANSFORMACION (0-100):
+   Basado en el Eje de Transformación. Ten en cuenta:
+   - Qué posición ocupa el usuario al final (no al inicio)
+   - Si hubo alguna declaración voluntaria de acción o responsabilidad
+   - Si el usuario mostró apertura a nuevas formas de observarse
+   - Si el lenguaje evolucionó de queja a posibilidad
+
+5. TURNO_QUIEBRE (número de turno o 0 si no hubo):
+   ¿En qué turno se produjo el mayor giro en el observador?
+
+6. DECLARACION_DETECTADA (si|no):
+   ¿El usuario hizo alguna declaración voluntaria de responsabilidad o acción?
+
+7. DECLARACION_TEXTO (extracto o vacío):
+   Si hubo declaración, copia el fragmento exacto.
+
+8. LLAVE_MAESTRA_DOMINANTE:
+   La llave maestra más frecuente o significativa de la sesión.
+
+9. NIVEL_RIESGO_MAX (ninguno|latente|alto|critico):
+   El mayor nivel de riesgo alcanzado en cualquier turno.
+
+10. DICTAMEN_CONVERSACION (2-3 frases):
+    Síntesis narrativa del arco completo. ¿Qué ocurrió en esta conversación?
+    Habla del observador, no de los temas tratados.
+
+11. RECOMENDACION (1-2 frases):
+    ¿Qué debería trabajar ONTOMIND en la siguiente sesión con este usuario?
+
+Responde SOLO con este formato CSV (sin saltos de línea, sin explicaciones):
+posicion_inicial|posicion_final|arco|score|turno_quiebre|declaracion_si_no|declaracion_texto|llave_maestra|nivel_riesgo_max|dictamen|recomendacion
+
+Ejemplo:
+victima|mixto|avance|38|2|no||Declaración de No-Posibilidad|ninguno|El usuario llegó desde la queja sin movimiento y al final mostró apertura a verse como autor. No hubo declaración pero sí un primer quiebre del automatismo.|Profundizar en la Voz de Supervivencia detrás de la búsqueda de aprobación externa.
+"""

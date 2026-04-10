@@ -116,6 +116,45 @@ class MapaObservador:
         except Exception as e:
             print(f"[Supabase] Error registrar_log_nodos: {e}")
 
+    async def guardar_evaluacion_conversacion(self, session_id: str, user_code: str, datos: dict):
+        """Guarda o actualiza la evaluación del arco conversacional completo."""
+        try:
+            import httpx
+            url = SUPABASE_URL.strip()
+            key = SUPABASE_KEY.strip()
+            async with httpx.AsyncClient(timeout=15) as client:
+                r = await client.post(
+                    f"{url}/rest/v1/evaluaciones_conversacion",
+                    headers={
+                        "apikey": key,
+                        "Authorization": "Bearer " + key,
+                        "Content-Type": "application/json",
+                        "Prefer": "resolution=merge-duplicates"
+                    },
+                    json={
+                        "session_id":              session_id,
+                        "user_code":               user_code,
+                        "timestamp":               datetime.utcnow().isoformat(),
+                        "total_turnos":            datos.get("total_turnos", 0),
+                        "score_transformacion":    datos.get("score_transformacion", 0),
+                        "posicion_inicial":        datos.get("posicion_inicial", "victima"),
+                        "posicion_final":          datos.get("posicion_final", "victima"),
+                        "arco_detectado":          datos.get("arco_detectado", "estable"),
+                        "turno_quiebre":           datos.get("turno_quiebre", 0),
+                        "declaracion_detectada":   datos.get("declaracion_detectada", False),
+                        "declaracion_texto":       datos.get("declaracion_texto", ""),
+                        "llave_maestra_dominante": datos.get("llave_maestra_dominante", ""),
+                        "protocolo_dominante":     datos.get("protocolo_dominante", "normal"),
+                        "nivel_riesgo_max":        datos.get("nivel_riesgo_max", "ninguno"),
+                        "dictamen_conversacion":   datos.get("dictamen_conversacion", ""),
+                        "recomendacion":           datos.get("recomendacion", ""),
+                    }
+                )
+                if r.status_code not in (200, 201):
+                    print(f"[Supabase] Error eval_conversacion: {r.status_code} {r.text[:100]}")
+        except Exception as e:
+            print(f"[Supabase] Error guardar_evaluacion_conversacion: {e}")
+
     async def guardar_evaluacion(self, session_id: str, turno: int, evaluacion: dict):
         """Actualiza el campo evaluacion en log_nodos para este turno."""
         try:
