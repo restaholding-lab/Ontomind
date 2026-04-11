@@ -497,8 +497,11 @@ async def nodo_evaluador(state: OntomindState) -> OntomindState:
             "5. patron_repetitivo 0=no/1=si: ¿La estructura de inicio y fin es similar a las 2 respuestas anteriores?\n"
             "6. brevedad_impacto 0=no/1=si: ¿Hay alguna pregunta de menos de 6 palabras en el cuerpo del mensaje?\n"
             "7. arrogancia_intelectual 0=no/1=si: ¿Uso 'narrativa','saboteando','Te invito a reflexionar','Es posible que no te des cuenta','Hay una contradiccion central','Te escucho','Entiendo que','Me llega ese'?\n"
-            "8. nota_breve: una frase\n"
-            "Ejemplo: 12,8,7,4,0,1,0,Zarpazo intercalado efectivo con espejo crudo"
+            "8. lenguaje_manual 0=no/1=si: ¿Uso frases de consejero como 'La excelencia surge de...','el apoyo mutuo es clave','podriais colaborar','las oportunidades de crecimiento','Te invito a considerar'?\n"
+            "9. rotundidad_seca 0=no/1=si: ¿Nombra la emocion que el usuario NIEGA (ira, rabia, soberbia, miedo) sin suavizantes ni rodeos?\n"
+            "10. zarpazo_identidad 0=no/1=si: ¿La pregunta intercalada ataca la IDENTIDAD del observador (quien eres tu ahi) en lugar del plan de accion (crees que eso es la solucion)?\n"
+            "11. nota_breve: una frase\n"
+            "Ejemplo: 12,8,7,4,0,1,0,0,1,1,Espejo crudo con zarpazo de identidad efectivo"
         )
         raw = await llamar_llm(prompt, "", temperatura=0.1)
         raw = raw.strip().replace("\n", " ")
@@ -514,25 +517,31 @@ async def nodo_evaluador(state: OntomindState) -> OntomindState:
         hd  = safe_int(parts[3] if len(parts)>3 else 0, max_val=5)
         rep = str(parts[4]).strip() == "1" if len(parts)>4 else False
         brv = str(parts[5]).strip() == "1" if len(parts)>5 else False
-        arrog = str(parts[6]).strip() == "1" if len(parts)>6 else False
-        nota  = str(parts[7]).strip() if len(parts)>7 else "Sin nota"
+        arrog  = str(parts[6]).strip() == "1" if len(parts)>6 else False
+        lm     = str(parts[7]).strip() == "1" if len(parts)>7 else False
+        rots   = str(parts[8]).strip() == "1" if len(parts)>8 else False
+        zid    = str(parts[9]).strip() == "1" if len(parts)>9 else False
+        nota   = str(parts[10]).strip() if len(parts)>10 else "Sin nota"
         # Score: base + bonificaciones - penalizaciones
         base  = es + zi + ec + hd
-        bonus = 10 if brv else 0
-        penal = (15 if rep else 0) + (20 if arrog else 0)
+        bonus = (10 if brv else 0) + (15 if rots else 0) + (5 if zid else 0)
+        penal = (15 if rep else 0) + (20 if arrog else 0) + (20 if lm else 0)
         total = base + bonus - penal
         state["evaluacion"] = {
-            "escucha_sombras":     es,
-            "zarpazo_intercalado": zi,
-            "espejo_crudo":        ec,
-            "hacia_declaracion":   hd,
-            "brevedad_impacto":    brv,
-            "patron_repetitivo":   rep,
+            "escucha_sombras":        es,
+            "zarpazo_intercalado":    zi,
+            "espejo_crudo":           ec,
+            "hacia_declaracion":      hd,
+            "brevedad_impacto":       brv,
+            "patron_repetitivo":      rep,
             "arrogancia_intelectual": arrog,
-            "score_total":         max(0, total),
-            "nota_evaluador":      nota
+            "lenguaje_manual":        lm,
+            "rotundidad_seca":        rots,
+            "zarpazo_identidad":      zid,
+            "score_total":            max(0, total),
+            "nota_evaluador":         nota
         }
-        print(f"[EVALUADOR] Score: {max(0,total)}/40 | ZI:{zi} EC:{ec} Rep:{rep} Brv:{brv} Arr:{arrog} | {nota}")
+        print(f"[EVALUADOR] Score: {max(0,total)}/55 | ZI:{zi} RS:{rots} ZID:{zid} LM:{lm} Arr:{arrog} | {nota}")
     except Exception as e:
         print(f"[EVALUADOR] Error: {e}")
         state["evaluacion"] = {
