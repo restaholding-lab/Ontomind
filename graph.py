@@ -31,11 +31,21 @@ def router_silencio(state: OntomindState) -> Literal["detectores", "distinciones
 
 def router_riesgo(state: OntomindState) -> Literal["prueba_fuego", "distinciones"]:
     """
-    HARD-LOCK: si nivel es critico, va directo a prueba_fuego (que activa ANCORA).
-    Si es alto, pasa por prueba_fuego para verificar dominio.
-    Solo si es ninguno/latente va a distinciones para coaching normal.
+    VIGIL v2.1 — Routing condicional:
+    - CRITICO: siempre a prueba_fuego (ANCORA)
+    - ALTO con Llave Maestra activa: ceder al Maestro via distinciones (coaching, no crisis)
+    - ALTO sin Llave Maestra: a prueba_fuego
+    - LATENTE/NINGUNO: a distinciones
     """
-    if state["nivel_riesgo"] in ("alto", "critico"):
+    nivel = state["nivel_riesgo"]
+    llave = state.get("dictamen", {}).get("llave_maestra", "")
+    if nivel == "critico":
+        return "prueba_fuego"
+    if nivel == "alto" and llave:
+        # Hay llave maestra activa: es coaching, no crisis psiquiatrica
+        # VIGIL ya alertó al supervisor, el Maestro continúa
+        return "distinciones"
+    if nivel == "alto":
         return "prueba_fuego"
     return "distinciones"
 
