@@ -55,6 +55,7 @@ class OntomindState(TypedDict):
     evaluacion:              dict       # metricas de recompensa antropologica
     evaluacion_conversacion: dict       # score 0-100 eje de transformacion
     user_code:               str        # codigo de usuario persistente
+    turnos_sin_declaracion:  int        # contador para modo presencia
 
 
 # ─── Llamada LLM genérica ────────────────────────────────
@@ -213,22 +214,56 @@ async def nodo_triple_filtro_vigil(state: OntomindState) -> OntomindState:
             quiebre.get("osar_afectado") == "completo"):
         nivel = "alto"
 
-    # HARD-LOCK 1: dominio multiple/sentido/vida + victima > 0.8 = CRITICO sin pasar por DISTINCIONES
-    # El flujo hacia [DISTINCIONES] queda fisicamente desconectado
+    # HARD-LOCK v2.1 — Umbral recalibrado para reducir falsos positivos
     conf_victima_actual = float(state["reporte_victima"].get("confianza", 0))
     dominios_colapso = {"sentido", "vida", "identidad", "multiple"}
     dominio_actual = quiebre.get("dominio_afectado", "")
-    if dominio_actual in dominios_colapso and conf_victima_actual > 0.8:
+
+    # Detectar Llave Maestra activa (si hay llave, es coaching no crisis)
+    llave_activa = state.get("dictamen", {}).get("llave_maestra", "")
+    hay_llave_maestra = bool(llave_activa)
+
+    # Señales de daño inminente (self-harm) — umbral NUNCA baja
+    tokens_daño_real = {
+        "hacerme daño", "hacerme algo", "quitarme la vida", "suicidarme",
+        "no quiero vivir", "mejor muerto", "mejor muerta", "acabar con todo",
+        "atentar contra", "hacerle daño", "matarme", "matarle"
+    }
+    daño_inminente = any(t in texto for t in tokens_daño_real)
+
+    # HARD-LOCK 1: Daño inminente = CRÍTICO siempre (sin excepción)
+    if daño_inminente:
         nivel = "critico"
 
-    # HARD-LOCK 2: tokens de cierre explícitos = CRITICO inmediato
-    tokens_cierre = {
-        "no puedo mas", "no puedo más", "ya no puedo", "no tengo fuerzas",
-        "no me preguntes", "dejar constancia", "no quiero ayuda",
-        "nadie me ayude", "sin salida", "bucle sin salida", "no hay salida"
-    }
-    if any(t in texto for t in tokens_cierre):
+    # HARD-LOCK 2: Crisis existencial COMPLETA requiere 3 señales simultáneas
+    # (dominio vital + víctima muy alta + sin llave maestra de coaching)
+    elif dominio_actual in dominios_colapso and conf_victima_actual > 0.85 and not hay_llave_maestra:
         nivel = "critico"
+
+    # HARD-LOCK 3: Señal aislada de frustración extrema → solo ALTO (no crítico)
+    # VIGIL alerta al supervisor pero el Maestro continúa con Rotundidad Amorosa
+    tokens_frustracion = {
+        "no puedo mas", "no puedo más", "ya no puedo", "no tengo fuerzas",
+        "sin salida", "no hay salida", "bucle sin salida", "le colgue", "le colgué"
+    }
+    tokens_rechazo_ayuda = {
+        "no me preguntes", "dejar constancia", "no quiero ayuda", "nadie me ayude"
+    }
+    frustracion_aislada = any(t in texto for t in tokens_frustracion)
+    rechazo_ayuda = any(t in texto for t in tokens_rechazo_ayuda)
+
+    if frustracion_aislada and nivel == "ninguno":
+        # Frustración sin otros indicadores → latente, no crítico
+        nivel = "latente"
+    if rechazo_ayuda and nivel in ("ninguno", "latente"):
+        # Rechazo de ayuda sin señales de daño → alto, no crítico
+        nivel = "alto"
+
+    # FILTRO CONTEXTUAL: Si hay Llave Maestra de coaching (Dignidad, Justicia, etc.)
+    # VIGIL cede prioridad al Maestro — es coaching, no crisis psiquiátrica
+    if hay_llave_maestra and nivel == "critico" and not daño_inminente:
+        nivel = "alto"
+        print(f"[VIGIL] Cediendo prioridad al Maestro — Llave Maestra activa: {llave_activa}")
 
     # FAIL-SAFE original: dominio vida|sentido + no_posibilidad alta = CRITICO directo
     # No se hace coaching sobre falta de sentido vital sin red de seguridad humana
@@ -409,8 +444,23 @@ async def nodo_maestro(state: OntomindState) -> OntomindState:
             "cambio en una frase antes de la pregunta."
         )
 
+    # Detectar modo presencia (turnos > 3 sin declaracion)
+    turnos_sd = state.get("turnos_sin_declaracion", 0)
+    modo_presencia = turnos_sd >= 3
+    if modo_presencia:
+        instruccion_presencia = (
+            "\n\nMODO PRESENCIA ACTIVO (llevas " + str(turnos_sd) + " turnos sin declaracion):\n"
+            "ABANDONA la validacion. Entra en ROTUNDIDAD AMOROSA pura.\n"
+            "- Cero preambulos empaticos\n"
+            "- Zarpazo intercalado en la primera frase\n"
+            "- Terminar con afirmacion punzante, NO con pregunta\n"
+            "- Nombrar el costo exacto que el usuario paga por su comodidad"
+        )
+    else:
+        instruccion_presencia = ""
+
     # Inyectar Raiz Antropologica como marco permanente del Maestro
-    prompt_maestro_enriquecido = PROMPT_MAESTRO + "\n\n" + CONTEXTO_RAIZ_ANTROPOLOGICA
+    prompt_maestro_enriquecido = PROMPT_MAESTRO + "\n\n" + CONTEXTO_RAIZ_ANTROPOLOGICA + instruccion_presencia
     state["respuesta"] = await llamar_llm(
         prompt_maestro_enriquecido,
         contexto_maestro,
@@ -428,18 +478,27 @@ async def nodo_evaluador(state: OntomindState) -> OntomindState:
     """
     import re as re2
     try:
+        # Ultimas respuestas para detectar patron repetitivo
+        mensajes_prev = await sesion_redis.get_mensajes(state["session_id"])
+        resp_previas = [m["contenido"][:80] for m in mensajes_prev if m["rol"] == "assistant"][-2:]
+        resp_actual = state.get("respuesta","")[:80]
+        prev_txt = " | ".join(resp_previas) if resp_previas else "ninguna"
+
         prompt = (
             "Evalua esta respuesta de coaching ontologico.\n"
             "Usuario dijo: " + state.get("user_input", "") + "\n"
-            "Respuesta del coach: " + state.get("respuesta", "") + "\n\n"
+            "Respuesta del coach: " + state.get("respuesta", "") + "\n"
+            "Respuestas anteriores (para detectar patron repetitivo): " + prev_txt + "\n\n"
             "METRICAS (responde SOLO numeros separados por coma en este orden):\n"
-            "1. escucha_sombras 0-15: ¿Valido la emocion real ANTES de cualquier distincion? ¿El usuario se siente visto?\n"
-            "2. voz_supervivencia 0-10: ¿Nombro la Voz de Supervivencia como duda compartida con calidez?\n"
-            "3. persistencia 0-10: ¿Prolonga el espacio de reflexion o cierra el tema?\n"
-            "4. hacia_declaracion 0-5: ¿La pregunta final invita a declarar una nueva forma de ser?\n"
-            "5. arrogancia_intelectual 0=no/1=si: ¿Uso 'narrativa', 'saboteando', 'Te invito a reflexionar', 'Es posible que no te des cuenta', 'Hay una contradiccion central'?\n"
-            "6. nota_breve: una frase corta\n"
-            "Ejemplo: 12,7,8,4,0,Validacion calida y pregunta humilde efectiva"
+            "1. escucha_sombras 0-15: ¿Parafraseo directo sin 'Te escucho'/'Entiendo que'? ¿Sin apertura muleta?\n"
+            "2. zarpazo_intercalado 0-10: ¿Inserto una pregunta de maximo 5 palabras EN MITAD de una frase (no al final)?\n"
+            "3. espejo_crudo 0-10: ¿Tradujo un concepto blando (tranquilidad/dignidad/resignacion) a su verdad incomoda?\n"
+            "4. hacia_declaracion 0-5: ¿Termino con afirmacion punzante O pregunta de declaracion (no siempre pregunta)?\n"
+            "5. patron_repetitivo 0=no/1=si: ¿La estructura de inicio y fin es similar a las 2 respuestas anteriores?\n"
+            "6. brevedad_impacto 0=no/1=si: ¿Hay alguna pregunta de menos de 6 palabras en el cuerpo del mensaje?\n"
+            "7. arrogancia_intelectual 0=no/1=si: ¿Uso 'narrativa','saboteando','Te invito a reflexionar','Es posible que no te des cuenta','Hay una contradiccion central','Te escucho','Entiendo que','Me llega ese'?\n"
+            "8. nota_breve: una frase\n"
+            "Ejemplo: 12,8,7,4,0,1,0,Zarpazo intercalado efectivo con espejo crudo"
         )
         raw = await llamar_llm(prompt, "", temperatura=0.1)
         raw = raw.strip().replace("\n", " ")
@@ -447,23 +506,33 @@ async def nodo_evaluador(state: OntomindState) -> OntomindState:
         def safe_int(v, default=0, max_val=10):
             try: return max(0, min(max_val, int(str(v).strip())))
             except: return default
-        # Nuevo orden: escucha_sombras(0-15), voz_supervivencia(0-10), persistencia(0-10), hacia_declaracion(0-5), arrogancia, nota
-        es = safe_int(parts[0] if len(parts)>0 else 0, max_val=15)
-        vs = safe_int(parts[1] if len(parts)>1 else 0)
-        p  = safe_int(parts[2] if len(parts)>2 else 0)
-        hd = safe_int(parts[3] if len(parts)>3 else 0, max_val=5)
-        arrog = str(parts[4]).strip() == "1" if len(parts)>4 else False
-        nota  = str(parts[5]).strip() if len(parts)>5 else "Sin nota"
-        # Penalizacion de arrogancia: -20 puntos (antes era -10)
-        total = es + vs + p + hd - (20 if arrog else 0)
+        # Nuevas metricas: escucha_sombras, zarpazo_intercalado, espejo_crudo, hacia_declaracion,
+        # patron_repetitivo, brevedad_impacto, arrogancia_intelectual, nota
+        es  = safe_int(parts[0] if len(parts)>0 else 0, max_val=15)
+        zi  = safe_int(parts[1] if len(parts)>1 else 0)
+        ec  = safe_int(parts[2] if len(parts)>2 else 0)
+        hd  = safe_int(parts[3] if len(parts)>3 else 0, max_val=5)
+        rep = str(parts[4]).strip() == "1" if len(parts)>4 else False
+        brv = str(parts[5]).strip() == "1" if len(parts)>5 else False
+        arrog = str(parts[6]).strip() == "1" if len(parts)>6 else False
+        nota  = str(parts[7]).strip() if len(parts)>7 else "Sin nota"
+        # Score: base + bonificaciones - penalizaciones
+        base  = es + zi + ec + hd
+        bonus = 10 if brv else 0
+        penal = (15 if rep else 0) + (20 if arrog else 0)
+        total = base + bonus - penal
         state["evaluacion"] = {
-            "persistencia": p, "escucha_sombras": es,
-            "voz_supervivencia": vs, "hacia_declaracion": hd,
+            "escucha_sombras":     es,
+            "zarpazo_intercalado": zi,
+            "espejo_crudo":        ec,
+            "hacia_declaracion":   hd,
+            "brevedad_impacto":    brv,
+            "patron_repetitivo":   rep,
             "arrogancia_intelectual": arrog,
-            "score_total": max(0, total),
-            "nota_evaluador": nota
+            "score_total":         max(0, total),
+            "nota_evaluador":      nota
         }
-        print(f"[EVALUADOR] Score: {max(0,total)}/40 | ArroganciaI: {arrog} | {nota}")
+        print(f"[EVALUADOR] Score: {max(0,total)}/40 | ZI:{zi} EC:{ec} Rep:{rep} Brv:{brv} Arr:{arrog} | {nota}")
     except Exception as e:
         print(f"[EVALUADOR] Error: {e}")
         state["evaluacion"] = {

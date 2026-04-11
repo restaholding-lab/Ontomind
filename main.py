@@ -103,6 +103,8 @@ async def chat(request: MensajeRequest):
         "ancora_previo":          False,
         "respuesta":              "",
         "evaluacion":             {},
+        "evaluacion_conversacion": {},
+        "turnos_sin_declaracion":  sesion.get("turnos_sin_declaracion", 0),
         "user_code":              request.user_code
     }
 
@@ -119,6 +121,12 @@ async def chat(request: MensajeRequest):
     # Actualizar estado de sesión para el siguiente turno
     sesion["confianza_victima_acum"] = resultado.get("confianza_victima_acum", 0)
     sesion["pregunta_dominio_hecha"] = resultado.get("pregunta_dominio_hecha", False)
+    # Actualizar contador de turnos sin declaracion
+    eval_conv = resultado.get("evaluacion_conversacion", {})
+    if eval_conv.get("declaracion_detectada"):
+        sesion["turnos_sin_declaracion"] = 0
+    else:
+        sesion["turnos_sin_declaracion"] = sesion.get("turnos_sin_declaracion", 0) + 1
     sesion["protocolo"]              = resultado.get("protocolo", "normal")
     await sesion_redis.set(request.session_id, sesion)
 
