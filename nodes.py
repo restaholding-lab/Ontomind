@@ -12,7 +12,8 @@ import httpx
 from prompts import (PROMPT_E_ACTOS, PROMPT_E_JUICIOS, PROMPT_P_QUIEBRE,
                      PROMPT_P_VICTIMA, PROMPT_DISTINCIONES, PROMPT_MAESTRO,
                      CONTEXTO_RAIZ_ANTROPOLOGICA, PROMPT_EVALUADOR,
-                     PROMPT_EVALUADOR_CONVERSACION)
+                     PROMPT_EVALUADOR_CONVERSACION, CONTEXTO_ETICO_FUNDACIONAL,
+                     DOCUMENTO_REFERENCIA_MAESTRO)
 from rag import recuperar_contexto, formatear_contexto
 from memory import mapa_observador, sesion_redis
 
@@ -500,8 +501,38 @@ async def nodo_maestro(state: OntomindState) -> OntomindState:
     else:
         instruccion_presencia = ""
 
+    # Seleccionar sección relevante del Documento de Referencia según perfil
+    pos_victima  = state["reporte_victima"].get("posicion", "mixto")
+    protocolo    = state.get("protocolo", "normal")
+    nivel_riesgo = state.get("nivel_riesgo", "ninguno")
+    llave        = state.get("dictamen", {}).get("llave_maestra", "")
+
+    # Inyectar siempre: Pinotti P1-P4 (patrones base)
+    # + Golden Standard del perfil detectado
+    if pos_victima == "protagonista":
+        seccion_ref = DOCUMENTO_REFERENCIA_MAESTRO  # completo si hay avance
+    elif "Juez" in llave or "Control" in llave or "Soberbia" in llave or protocolo == "incoherencia":
+        # Perfil Juez: Pinotti + Golden Juez/Control
+        seccion_ref = DOCUMENTO_REFERENCIA_MAESTRO
+    elif nivel_riesgo in ("alto", "critico"):
+        # Dolor agudo o crisis: Pinotti + Golden Dolor
+        seccion_ref = DOCUMENTO_REFERENCIA_MAESTRO
+    elif pos_victima == "victima":
+        # Víctima estancada: completo
+        seccion_ref = DOCUMENTO_REFERENCIA_MAESTRO
+    else:
+        # Caso general: solo los 6 patrones Pinotti (Prioridad 1)
+        idx_p2 = DOCUMENTO_REFERENCIA_MAESTRO.find("PRIORIDAD 2")
+        seccion_ref = DOCUMENTO_REFERENCIA_MAESTRO[:idx_p2].strip() if idx_p2 > 0 else DOCUMENTO_REFERENCIA_MAESTRO
+
     # Inyectar Raiz Antropologica como marco permanente del Maestro
-    prompt_maestro_enriquecido = PROMPT_MAESTRO + "\n\n" + CONTEXTO_RAIZ_ANTROPOLOGICA + instruccion_presencia
+    prompt_maestro_enriquecido = (
+        PROMPT_MAESTRO + "\n\n"
+        + CONTEXTO_RAIZ_ANTROPOLOGICA + "\n\n"
+        + CONTEXTO_ETICO_FUNDACIONAL + "\n\n"
+        + seccion_ref
+        + instruccion_presencia
+    )
     state["respuesta"] = await llamar_llm(
         prompt_maestro_enriquecido,
         contexto_maestro,
