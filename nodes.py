@@ -17,6 +17,8 @@ from rag import recuperar_contexto, formatear_contexto
 from memory import mapa_observador, sesion_redis
 
 OPENAI_API_KEY = "".join(os.getenv("OPENAI_API_KEY", "").split())
+QDRANT_URL     = os.getenv("QDRANT_URL", "").strip()
+QDRANT_API_KEY = os.getenv("QDRANT_API_KEY", "").strip()
 OPENAI_MODEL   = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 
 RESPUESTA_ANCORA = """Lo que describes me importa, y quiero estar presente en esto contigo.
@@ -370,6 +372,45 @@ async def nodo_distinciones(state: OntomindState) -> OntomindState:
             "\n\nNOTA DE CONTINUIDAD: Este usuario atravesó un momento "
             "difícil anteriormente. Si detectas avance, valídalo sutilmente."
         )
+
+    # ── Buscar patrón conversacional del cómic Pinotti ──────
+    try:
+        pos_victima  = state["reporte_victima"].get("posicion", "mixto")
+        tipo_quiebre = state["reporte_quiebre"].get("tipo", "")
+        if pos_victima == "victima":
+            perfil_busq = "usuario victima estancado " + state["user_input"][:100]
+        elif state.get("protocolo") == "incoherencia":
+            perfil_busq = "usuario juez control " + state["user_input"][:100]
+        else:
+            perfil_busq = "usuario reflexivo " + tipo_quiebre + " " + state["user_input"][:100]
+
+        async with httpx.AsyncClient(timeout=15) as hc:
+            emb_r = await hc.post(
+                "https://api.openai.com/v1/embeddings",
+                headers={"Authorization": "Bearer " + OPENAI_API_KEY.strip()},
+                json={"model": "text-embedding-3-small", "input": perfil_busq}
+            )
+            if emb_r.status_code == 200:
+                qvec = emb_r.json()["data"][0]["embedding"]
+                srch = await hc.post(
+                    QDRANT_URL.strip() + "/collections/ontomind_patron_conversacional/points/search",
+                    headers={"api-key": QDRANT_API_KEY.strip(), "Content-Type": "application/json"},
+                    json={"vector": qvec, "limit": 2, "with_payload": True}
+                )
+                if srch.status_code == 200:
+                    hits = srch.json().get("result", [])
+                    if hits:
+                        mejor = hits[0]["payload"]
+                        patron_txt = (
+                            "\n\nPATRÓN CONVERSACIONAL PINOTTI (referencia para esta situación):\n"
+                            "Situación similar: " + mejor.get("situacion","") + "\n"
+                            "Patrón del coach: " + mejor.get("patron","") + "\n"
+                            "Diálogo de referencia:\n" + mejor.get("dialogo","") + "\n"
+                        )
+                        user_msg += patron_txt
+                        print(f"[DISTINCIONES] Patrón Pinotti: {mejor.get('tema','')}")
+    except Exception as ep:
+        print(f"[DISTINCIONES] Patrón conversacional no disponible: {ep}")
 
     respuesta = await llamar_llm(PROMPT_DISTINCIONES, user_msg, temperatura=0.4)
     state["dictamen"] = await parsear_json(respuesta)
