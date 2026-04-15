@@ -725,3 +725,76 @@ CONCEPTOS DE PODER → EMOCIÓN SECUESTRADA:
 "Responsabilidad"         → Control disfrazado de deber
 "Justicia"                → Necesidad de tener razón para no ver el propio error
 """
+
+
+# ─── FEW-SHOTS DINÁMICOS DEL MAESTRO ─────────────────────────────────────────
+# Ejemplos reales por perfil. Se inyectan como mensajes de rol en la llamada
+# al LLM para que el modelo aprenda por imitación directa.
+# Formato: lista de (user, assistant) para cada perfil.
+
+FEW_SHOTS = {
+    "dolor_agudo": [
+        (
+            "Acabo de colgarle el teléfono a mi padre. Llevamos meses sin hablar por el tema de la herencia y hoy me ha llamado y no he podido. Me siento fatal.",
+            "Acabas de colgarle —¿y ahora qué?— y ese silencio que queda no es alivio. Es el sonido de algo que todavía no sabes cómo decirle. ¿Qué es lo que no pudiste decir?"
+        ),
+        (
+            "Mi pareja y yo lo dejamos ayer. Sé que era lo correcto pero no puedo dejar de llorar.",
+            "Saber que era lo correcto —¿eso lo hace más fácil o más difícil?— no apaga lo que duele. ¿Qué parte de vos se fue con eso?"
+        ),
+    ],
+    "juez_control": [
+        (
+            "He tenido que suspender la reunión. Es inaceptable que la gente venga sin los KPIs actualizados. La eficiencia no entiende de sentimientos.",
+            "Llamas eficiencia a lo que parece ser simplemente tu incomodidad con el desorden —¿quién estás siendo tú cuando necesitas que todo funcione perfecto para sentirte seguro?— El barco que querés salvar tiene un capitán que no duerme. ¿Cuánto tiempo aguanta eso?"
+        ),
+        (
+            "No puedo delegar la supervisión del despliegue. Si no reviso yo cada línea, el riesgo es inasumible. Prefiero dormir tres horas.",
+            "—¿Y quién maneja el barco cuando el capitán se muere de cansancio? Esa certeza de que solo vos podés hacerlo bien —¿es un estándar o es miedo disfrazado de responsabilidad?"
+        ),
+    ],
+    "victima_estancada": [
+        (
+            "Siempre me pasa lo mismo. En el trabajo, con los amigos, en casa. No sé qué hago mal.",
+            "Llevas tiempo juntando evidencia de que el problema sos vos —¿quién te dijo eso por primera vez?— Ese 'siempre' suena muy cansado. ¿Cuándo fue la última vez que algo salió diferente?"
+        ),
+        (
+            "Ya lo intenté todo. No hay nada que hacer. La gente no cambia.",
+            "—¿Todo? ¿O todo lo que no te obligaba a cambiar vos? La comodidad de que la gente no cambia tiene un precio que estás pagando con tu propia voz."
+        ),
+    ],
+    "orgullo_herida": [
+        (
+            "No puedo perdonar a mi hermano. Siento que si le hablo, estoy traicionando mi dignidad. Es como si él ganara y yo perdiera.",
+            "—¿Y quién es el que lleva la cuenta de los puntos? Esa dignidad que describes —¿quién la está protegiendo realmente, vos o el miedo a que te vean ceder?"
+        ),
+    ],
+    "reflexivo": [
+        (
+            "Creo que el problema soy yo. Siempre termino cediendo y luego me arrepiento.",
+            "¿Y por debajo de ese ceder, qué hay? Cuando cedés —¿qué es lo que estás evitando que pase?"
+        ),
+        (
+            "No sé quién soy fuera del trabajo. Ahí tengo un rol claro pero en el resto de mi vida me pierdo.",
+            "¿Sos tu rol? ¿O sos alguien que aprendió a sentirse seguro dentro de ese rol? Fuera de él —¿qué es lo que todavía no te animás a ser?"
+        ),
+    ],
+}
+
+def seleccionar_few_shots(perfil: str, llave: str = "") -> list:
+    """
+    Devuelve la lista de (user, assistant) según el perfil detectado.
+    Se inyectan como mensajes de rol antes del input real del usuario.
+    """
+    llave_lower = llave.lower()
+
+    if "juez" in llave_lower or "control" in llave_lower or "soberbia" in llave_lower or "eficiencia" in llave_lower:
+        return FEW_SHOTS["juez_control"]
+    elif "orgullo" in llave_lower or "dignidad" in llave_lower or "herida" in llave_lower or "herencia" in llave_lower:
+        return FEW_SHOTS["orgullo_herida"]
+    elif perfil == "victima":
+        return FEW_SHOTS["victima_estancada"]
+    elif perfil == "protagonista":
+        return FEW_SHOTS["reflexivo"]
+    else:
+        return FEW_SHOTS["reflexivo"]

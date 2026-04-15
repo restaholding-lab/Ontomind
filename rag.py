@@ -40,16 +40,18 @@ async def recuperar_contexto(
     nodo:    str,
     query:   str,
     top_k:   int = 4,
-    filtro_autor: Optional[str] = None
+    filtro_autor: Optional[str] = None,
+    solo_conversacional: bool = True
 ) -> list[dict]:
     """
     Recupera los fragmentos más relevantes del corpus para un nodo.
-    
+
     Args:
         nodo: nombre del nodo ("e_actos", "e_juicios", etc.)
         query: texto de búsqueda
         top_k: número de resultados
         filtro_autor: "echeverria" | "pinotti" | None (todos)
+        solo_conversacional: si True, filtra chunks teóricos (tipo_tono != teorico)
     
     Returns:
         Lista de dicts con "texto", "autor", "score", "fuente"
@@ -62,17 +64,29 @@ async def recuperar_contexto(
         vector = await embed_texto(query)
 
         body = {
-            "vector":       vector,
-            "limit":        top_k,
-            "with_payload": True,
+            "vector":          vector,
+            "limit":           top_k,
+            "with_payload":    True,
             "score_threshold": 0.35
         }
 
-        # Filtro opcional por autor
+        # Construir filtros combinados
+        filtros_must     = []
+        filtros_must_not = []
+
         if filtro_autor:
-            body["filter"] = {
-                "must": [{"key": "autor", "match": {"value": filtro_autor}}]
-            }
+            filtros_must.append({"key": "autor", "match": {"value": filtro_autor}})
+
+        # Filtro de tono: excluir teórico en coaching normal
+        if solo_conversacional:
+            filtros_must_not.append({"key": "tipo_tono", "match": {"value": "teorico"}})
+
+        if filtros_must or filtros_must_not:
+            body["filter"] = {}
+            if filtros_must:
+                body["filter"]["must"]     = filtros_must
+            if filtros_must_not:
+                body["filter"]["must_not"] = filtros_must_not
 
         async with httpx.AsyncClient(timeout=30) as client:
             r = await client.post(

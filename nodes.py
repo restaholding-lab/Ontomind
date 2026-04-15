@@ -13,7 +13,7 @@ from prompts import (PROMPT_E_ACTOS, PROMPT_E_JUICIOS, PROMPT_P_QUIEBRE,
                      PROMPT_P_VICTIMA, PROMPT_DISTINCIONES, PROMPT_MAESTRO,
                      CONTEXTO_RAIZ_ANTROPOLOGICA, PROMPT_EVALUADOR,
                      PROMPT_EVALUADOR_CONVERSACION, CONTEXTO_ETICO_FUNDACIONAL,
-                     DOCUMENTO_REFERENCIA_MAESTRO)
+                     DOCUMENTO_REFERENCIA_MAESTRO, FEW_SHOTS, seleccionar_few_shots)
 from rag import recuperar_contexto, formatear_contexto
 from memory import mapa_observador, sesion_redis
 
@@ -63,7 +63,30 @@ class OntomindState(TypedDict):
 
 # ─── Llamada LLM genérica ────────────────────────────────
 async def llamar_llm(system: str, user: str,
-                     temperatura: float = 0.3) -> str:
+                     temperatura: float = 0.3,
+                     es_maestro: bool = False) -> str:
+    """
+    Llamada al LLM. El nodo Maestro usa parámetros optimizados
+    para naturalidad conversacional (temperatura alta, penalizaciones
+    de frecuencia y presencia, max_tokens limitado).
+    El resto de nodos usan parámetros conservadores para JSON limpio.
+    """
+    if es_maestro:
+        params = {
+            "model":             OPENAI_MODEL,
+            "temperature":       0.75,   # más variación natural
+            "top_p":             0.9,    # nucleus sampling
+            "frequency_penalty": 0.25,   # evita muletillas repetidas
+            "presence_penalty":  0.3,    # incentiva temas nuevos
+            "max_tokens":        280,    # respuestas concisas
+        }
+    else:
+        params = {
+            "model":       OPENAI_MODEL,
+            "temperature": temperatura,
+            "max_tokens":  800,
+        }
+
     async with httpx.AsyncClient(timeout=60) as client:
         r = await client.post(
             "https://api.openai.com/v1/chat/completions",
@@ -72,12 +95,51 @@ async def llamar_llm(system: str, user: str,
                 "Content-Type":  "application/json"
             },
             json={
-                "model":       OPENAI_MODEL,
-                "temperature": temperatura,
+                **params,
                 "messages": [
                     {"role": "system", "content": system},
                     {"role": "user",   "content": user}
                 ]
+            }
+        )
+        r.raise_for_status()
+        return r.json()["choices"][0]["message"]["content"].strip()
+
+
+
+async def llamar_llm_con_shots(system: str, user: str,
+                                few_shots: list = None) -> str:
+    """
+    Variante de llamar_llm para el nodo Maestro.
+    Inyecta few-shots como mensajes de rol antes del input real.
+    Usa parámetros optimizados para naturalidad conversacional.
+    """
+    messages = [{"role": "system", "content": system}]
+
+    # Inyectar few-shots como contexto de imitación
+    if few_shots:
+        for user_ex, asst_ex in few_shots[:2]:  # máx 2 ejemplos
+            messages.append({"role": "user",      "content": user_ex})
+            messages.append({"role": "assistant", "content": asst_ex})
+
+    # Input real del usuario
+    messages.append({"role": "user", "content": user})
+
+    async with httpx.AsyncClient(timeout=60) as client:
+        r = await client.post(
+            "https://api.openai.com/v1/chat/completions",
+            headers={
+                "Authorization": "Bearer " + OPENAI_API_KEY.strip().replace(chr(10),"").replace(chr(13),""),
+                "Content-Type":  "application/json"
+            },
+            json={
+                "model":             OPENAI_MODEL,
+                "temperature":       0.75,
+                "top_p":             0.9,
+                "frequency_penalty": 0.25,
+                "presence_penalty":  0.3,
+                "max_tokens":        280,
+                "messages":          messages,
             }
         )
         r.raise_for_status()
@@ -396,7 +458,13 @@ async def nodo_distinciones(state: OntomindState) -> OntomindState:
                 srch = await hc.post(
                     QDRANT_URL.strip() + "/collections/ontomind_patron_conversacional/points/search",
                     headers={"api-key": QDRANT_API_KEY.strip(), "Content-Type": "application/json"},
-                    json={"vector": qvec, "limit": 2, "with_payload": True}
+                    json={"vector": qvec, "limit": 3, "with_payload": True,
+                        "filter": {
+                            "must_not": [
+                                {"key": "tipo_tono", "match": {"value": "teorico"}}
+                            ]
+                        }
+                    }
                 )
                 if srch.status_code == 200:
                     hits = srch.json().get("result", [])
@@ -533,10 +601,15 @@ async def nodo_maestro(state: OntomindState) -> OntomindState:
         + seccion_ref
         + instruccion_presencia
     )
-    state["respuesta"] = await llamar_llm(
+    # Few-shots dinámicos según perfil
+    pos_vic  = state["reporte_victima"].get("posicion", "mixto")
+    llave_fs = state.get("dictamen", {}).get("llave_maestra", "")
+    shots    = seleccionar_few_shots(pos_vic, llave_fs)
+
+    state["respuesta"] = await llamar_llm_con_shots(
         prompt_maestro_enriquecido,
         contexto_maestro,
-        temperatura=0.6
+        few_shots=shots
     )
     return state
 
