@@ -781,18 +781,31 @@ FEW_SHOTS = {
     ],
 }
 
-def seleccionar_few_shots(perfil: str, llave: str = "") -> list:
+def seleccionar_few_shots(perfil: str, llave: str = "", user_input: str = "") -> list:
     """
     Devuelve la lista de (user, assistant) según el perfil detectado.
     Se inyectan como mensajes de rol antes del input real del usuario.
     """
-    llave_lower = llave.lower()
+    ll = llave.lower()
+    ui = user_input.lower()
 
-    if "juez" in llave_lower or "control" in llave_lower or "soberbia" in llave_lower or "eficiencia" in llave_lower:
+    # Señales de perfil Juez/Control en llave o en el input
+    juez_llaves = ["juez", "control", "soberbia", "eficiencia", "incoherencia acto",
+                   "declaración de no-posibilidad", "no-posibilidad", "estándares",
+                   "excelencia", "profesionalidad", "hechos", "lógica"]
+    juez_input  = ["no puedo delegar", "kpis", "cada línea", "riesgo inasumible",
+                   "honestidad radical", "eficiencia", "nivel de exigencia",
+                   "estándares", "al 100%", "si no lo hago yo"]
+
+    if any(k in ll for k in juez_llaves) or any(k in ui for k in juez_input):
         return FEW_SHOTS["juez_control"]
-    elif "orgullo" in llave_lower or "dignidad" in llave_lower or "herida" in llave_lower or "herencia" in llave_lower:
+
+    orgullo_llaves = ["orgullo", "dignidad", "herida", "herencia", "ganar", "perder",
+                      "traición", "perdonar"]
+    if any(k in ll for k in orgullo_llaves):
         return FEW_SHOTS["orgullo_herida"]
-    elif perfil == "victima":
+
+    if perfil == "victima":
         return FEW_SHOTS["victima_estancada"]
     elif perfil == "protagonista":
         return FEW_SHOTS["reflexivo"]

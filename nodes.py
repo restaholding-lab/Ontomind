@@ -542,8 +542,11 @@ async def nodo_maestro(state: OntomindState) -> OntomindState:
     contexto_maestro = (
         f"PROTOCOLO ACTIVO: {protocolo}\n"
         f"DELTA OBSERVADOR: {delta}\n"
-        f"DICTAMEN DE [DISTINCIONES]:\n{json.dumps(dictamen, ensure_ascii=False)}\n\n"
+        f"DICTAMEN DE [DISTINCIONES] (referencia conceptual, NO copies el zarpazo literal):\n"
+        f"{json.dumps(dictamen, ensure_ascii=False)}\n\n"
         f"MENSAJE ORIGINAL DEL USUARIO:\n{state['user_input']}\n\n"
+        f"INSTRUCCIÓN: Genera tu propio zarpazo intercalado original.\n"
+        f"El zarpazo del dictamen es orientación, no texto a reproducir.\n\n"
         f"{instruccion_preguntas}"
     )
 
@@ -602,9 +605,9 @@ async def nodo_maestro(state: OntomindState) -> OntomindState:
         + instruccion_presencia
     )
     # Few-shots dinámicos según perfil
-    pos_vic  = state["reporte_victima"].get("posicion", "mixto")
-    llave_fs = state.get("dictamen", {}).get("llave_maestra", "")
-    shots    = seleccionar_few_shots(pos_vic, llave_fs)
+    pos_vic   = state["reporte_victima"].get("posicion", "mixto")
+    llave_fs  = state.get("dictamen", {}).get("llave_maestra", "")
+    shots     = seleccionar_few_shots(pos_vic, llave_fs, state.get("user_input", ""))
 
     state["respuesta"] = await llamar_llm_con_shots(
         prompt_maestro_enriquecido,
