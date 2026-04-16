@@ -279,7 +279,7 @@ async def nodo_triple_filtro_vigil(state: OntomindState) -> OntomindState:
             quiebre.get("osar_afectado") == "completo"):
         nivel = "alto"
 
-    # HARD-LOCK v2.1 — Umbral recalibrado para reducir falsos positivos
+    # HARD-LOCK v2.1 — Umbral recalibrado para reducir faleres positivos
     conf_victima_actual = float(state["reporte_victima"].get("confianza", 0))
     dominios_colapso = {"sentido", "vida", "identidad", "multiple"}
     dominio_actual = quiebre.get("dominio_afectado", "")
