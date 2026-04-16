@@ -97,6 +97,22 @@ async def recuperar_contexto(
                 },
                 json=body
             )
+            # Si falla con filtro (400), reintenta sin filtro de tono
+            if r.status_code == 400 and "filter" in body:
+                body_sin_filtro = {k: v for k, v in body.items() if k != "filter"}
+                # Mantener filtro de autor si lo hay
+                if filtro_autor:
+                    body_sin_filtro["filter"] = {
+                        "must": [{"key": "autor", "match": {"value": filtro_autor}}]
+                    }
+                r = await client.post(
+                    f"{QDRANT_URL}/collections/{coleccion}/points/search",
+                    headers={
+                        "api-key":      QDRANT_API_KEY,
+                        "Content-Type": "application/json"
+                    },
+                    json=body_sin_filtro
+                )
             r.raise_for_status()
             resultados = r.json().get("result", [])
 
