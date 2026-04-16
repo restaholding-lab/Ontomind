@@ -660,11 +660,12 @@ async def nodo_evaluador(state: OntomindState) -> OntomindState:
     """
     import re as re2
     try:
-        # Ultimas respuestas para detectar patron repetitivo
+        # Ultimas respuestas de ESTA MISMA sesion para detectar patron repetitivo
         mensajes_prev = await sesion_redis.get_mensajes(state["session_id"])
         resp_previas = [m["contenido"][:80] for m in mensajes_prev if m["rol"] == "assistant"][-2:]
-        resp_actual = state.get("respuesta","")[:80]
-        prev_txt = " | ".join(resp_previas) if resp_previas else "ninguna"
+        # Solo penalizar patron repetitivo si hay al menos 2 turnos previos en esta sesion
+        hay_historial = len(resp_previas) >= 2
+        prev_txt = " | ".join(resp_previas) if hay_historial else "primera_respuesta_sin_historial"
 
         prompt = (
             "Evalua esta respuesta de coaching ontologico en UNA SOLA LINEA CSV.\n"
@@ -680,11 +681,12 @@ async def nodo_evaluador(state: OntomindState) -> OntomindState:
             "- zarpazo_intercalado ALTO si: pregunta de maximo 5 palabras EN MITAD de frase con guiones\n"
             "- espejo_crudo ALTO si: traduce concepto blando (responsabilidad/dignidad/paz) a emocion oculta\n"
             "- hacia_declaracion ALTO si: cierra con pregunta que abre vacio sin respuesta implicita\n"
-            "- arrogancia=1 si usa: 'narrativa','saboteando','Te invito','Es posible que no te des cuenta'\n"
-            "- lenguaje_manual=1 si sugiere: delegar, colaborar, confiar en el equipo, buscar ayuda\n"
+            "- patron_repetitivo=1 SOLO si hay historial previo Y la estructura inicio+fin es identica a turnos anteriores. Si turnos_previos='primera_respuesta_sin_historial' entonces patron_repetitivo=0 SIEMPRE\n"
+            "- arrogancia=1 si usa: 'narrativa','saboteando','Te invito','Es posible que no te des cuenta','zona de confort'\n"
+            "- lenguaje_manual=1 si sugiere solucion: delegar, colaborar, confiar en el equipo, buscar ayuda, dar el paso\n"
             "- rotundidad_seca=1 si nombra ira/rabia/soberbia/miedo sin suavizantes\n"
             "- zarpazo_identidad=1 si la pregunta intercalada ataca quien es (no que hace)\n"
-            "Ejemplo correcto: 10,8,7,4,0,1,0,0,1,1,Zarpazo de identidad efectivo con espejo crudo"
+            "Ejemplo turno 1: 10,8,7,4,0,1,0,0,1,1,Zarpazo de identidad efectivo con espejo crudo"
         )
         raw = await llamar_llm(prompt, "", temperatura=0.1)
         raw = raw.strip().replace("\n", " ")
