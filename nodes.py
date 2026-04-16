@@ -539,14 +539,28 @@ async def nodo_maestro(state: OntomindState) -> OntomindState:
         if prohibir_preguntas else ""
     )
 
+    # Extraer solo los conceptos clave del dictamen (NO el zarpazo ya redactado)
+    dictamen_limpio = {
+        "llave_maestra":    dictamen.get("llave_maestra", ""),
+        "inquietud_real":   dictamen.get("inquietud_real", ""),
+        "punto_ciego":      dictamen.get("punto_ciego", ""),
+        "protocolo_especial": dictamen.get("protocolo_especial", "ninguno"),
+    }
+    # La pregunta de segundo orden sí se pasa — es orientación de dirección
+    pregunta_ref = dictamen.get("pregunta_segundo_orden", "")
+
     contexto_maestro = (
         f"PROTOCOLO ACTIVO: {protocolo}\n"
         f"DELTA OBSERVADOR: {delta}\n"
-        f"DICTAMEN DE [DISTINCIONES] (referencia conceptual, NO copies el zarpazo literal):\n"
-        f"{json.dumps(dictamen, ensure_ascii=False)}\n\n"
+        f"PERFIL DETECTADO: posicion={state['reporte_victima'].get('posicion','mixto')} | "
+        f"dominio={state['reporte_quiebre'].get('dominio_afectado','')}\n\n"
+        f"CONCEPTOS CLAVE (NO son texto a reproducir):\n"
+        f"- Llave maestra: {dictamen_limpio['llave_maestra']}\n"
+        f"- Lo que cuida el usuario: {dictamen_limpio['inquietud_real']}\n"
+        f"- Punto ciego: {dictamen_limpio['punto_ciego']}\n\n"
+        f"ORIENTACIÓN DE PREGUNTA (inspírate, no copies):\n"
+        f"{pregunta_ref}\n\n"
         f"MENSAJE ORIGINAL DEL USUARIO:\n{state['user_input']}\n\n"
-        f"INSTRUCCIÓN: Genera tu propio zarpazo intercalado original.\n"
-        f"El zarpazo del dictamen es orientación, no texto a reproducir.\n\n"
         f"{instruccion_preguntas}"
     )
 
