@@ -549,11 +549,30 @@ async def nodo_maestro(state: OntomindState) -> OntomindState:
     # La pregunta de segundo orden sí se pasa — es orientación de dirección
     pregunta_ref = dictamen.get("pregunta_segundo_orden", "")
 
+    # Detectar dolor agudo por señales en el input
+    ui_lower = state.get("user_input", "").lower()
+    dominio_q = state.get("reporte_quiebre", {}).get("dominio_afectado", "")
+    pos_vict  = state.get("reporte_victima", {}).get("posicion", "mixto")
+
+    señales_dolor = ["se fue llorando", "llorando", "me siento fatal", "cosas horribles",
+                     "le colgué", "nos separamos", "rompimos", "murió", "falleció",
+                     "me fui", "no sé qué hacer", "le dije cosas", "discutí muy"]
+    es_dolor_agudo = (
+        any(s in ui_lower for s in señales_dolor) or
+        ("relaciones" in dominio_q and pos_vict == "mixto")
+    )
+
+    perfil_label = "DOLOR_AGUDO" if es_dolor_agudo else (
+        "JUEZ_CONTROL" if pos_vict == "protagonista" else
+        "ESTANCAMIENTO" if "siempre" in ui_lower or "nunca" in ui_lower else
+        "REFLEXIVO"
+    )
+
     contexto_maestro = (
         f"PROTOCOLO ACTIVO: {protocolo}\n"
         f"DELTA OBSERVADOR: {delta}\n"
-        f"PERFIL DETECTADO: posicion={state['reporte_victima'].get('posicion','mixto')} | "
-        f"dominio={state['reporte_quiebre'].get('dominio_afectado','')}\n\n"
+        f"PERFIL DETECTADO: {perfil_label} | posicion={pos_vict} | "
+        f"dominio={dominio_q}\n\n"
         f"CONCEPTOS CLAVE (NO son texto a reproducir):\n"
         f"- Llave maestra: {dictamen_limpio['llave_maestra']}\n"
         f"- Lo que cuida el usuario: {dictamen_limpio['inquietud_real']}\n"
