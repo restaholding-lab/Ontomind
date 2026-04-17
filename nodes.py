@@ -108,12 +108,22 @@ async def llamar_llm(system: str, user: str,
 
 
 async def llamar_llm_con_shots(system: str, user: str,
-                                few_shots: list = None) -> str:
+                                few_shots: list = None,
+                                perfil: str = "") -> str:
     """
     Variante de llamar_llm para el nodo Maestro.
     Inyecta few-shots como mensajes de rol antes del input real.
     Usa parámetros optimizados para naturalidad conversacional.
+
+    Para dolor_agudo aplica assistant prefill ("—") que fuerza
+    la apertura con raya tipográfica, eliminando aperturas empáticas
+    genéricas ("Entiendo que...", "Parece que...") heredadas del RLHF.
     """
+    # Mapa de prefill por perfil: token que fuerza el primer token de respuesta
+    PREFILL_POR_PERFIL = {
+        "dolor_agudo": "—",
+    }
+
     messages = [{"role": "system", "content": system}]
 
     # Inyectar few-shots como contexto de imitación
@@ -124,6 +134,12 @@ async def llamar_llm_con_shots(system: str, user: str,
 
     # Input real del usuario
     messages.append({"role": "user", "content": user})
+
+    # PREFILL: si el perfil lo requiere, añadir turno assistant parcial.
+    # El modelo continúa desde ese token en lugar de generar libremente.
+    prefill_token = PREFILL_POR_PERFIL.get(perfil, "")
+    if prefill_token:
+        messages.append({"role": "assistant", "content": prefill_token})
 
     async with httpx.AsyncClient(timeout=60) as client:
         r = await client.post(
@@ -143,7 +159,13 @@ async def llamar_llm_con_shots(system: str, user: str,
             }
         )
         r.raise_for_status()
-        return r.json()["choices"][0]["message"]["content"].strip()
+        respuesta_raw = r.json()["choices"][0]["message"]["content"].strip()
+
+    # OpenAI devuelve solo la continuación tras el prefill.
+    # Reconstruimos la respuesta completa: prefill + continuación.
+    if prefill_token:
+        return prefill_token + respuesta_raw
+    return respuesta_raw
 
 
 async def parsear_json(texto: str) -> dict:
@@ -300,6 +322,17 @@ async def nodo_triple_filtro_vigil(state: OntomindState) -> OntomindState:
     if daño_inminente:
         nivel = "critico"
 
+    # Tokens EXCLUIDOS de frustración — confirmados como falsos positivos:
+    # son lenguaje de estancamiento laboral/relacional, NO de crisis.
+    tokens_falso_positivo = {
+        "estoy atrapado", "me siento atrapado", "atrapado en",
+        "asfixiando", "me está asfixiando", "cerrando el espacio",
+        "validar mi identidad", "transformar mi escucha",
+        "brecha de efectividad", "no-posibilidad", "llave maestra"
+    }
+    # Si el mensaje contiene tokens de falso positivo, reducir nivel máximo a latente
+    es_falso_positivo = any(t in texto for t in tokens_falso_positivo)
+
     # FILTRO FALSO POSITIVO: tokens de vocabulario ontológico/laboral
     # nunca superan nivel "latente" aunque haya otros indicadores
     if es_falso_positivo and not daño_inminente:
@@ -318,17 +351,6 @@ async def nodo_triple_filtro_vigil(state: OntomindState) -> OntomindState:
         "no puedo mas", "no puedo más", "ya no puedo", "no tengo fuerzas",
         "sin salida", "no hay salida", "bucle sin salida", "le colgue", "le colgué"
     }
-    # Tokens EXCLUIDOS de frustración — confirmados como falsos positivos:
-    # "atrapado", "asfixiando", "cerrando el espacio", "asfixia", "estoy atrapado"
-    # son lenguaje de estancamiento laboral/relacional, NO de crisis.
-    tokens_falso_positivo = {
-        "estoy atrapado", "me siento atrapado", "atrapado en",
-        "asfixiando", "me está asfixiando", "cerrando el espacio",
-        "validar mi identidad", "transformar mi escucha",
-        "brecha de efectividad", "no-posibilidad", "llave maestra"
-    }
-    # Si el mensaje contiene tokens de falso positivo, reducir nivel máximo a latente
-    es_falso_positivo = any(t in texto for t in tokens_falso_positivo)
     tokens_rechazo_ayuda = {
         "no me preguntes", "dejar constancia", "no quiero ayuda", "nadie me ayude"
     }
@@ -666,7 +688,8 @@ async def nodo_maestro(state: OntomindState) -> OntomindState:
     state["respuesta"] = await llamar_llm_con_shots(
         prompt_maestro_enriquecido,
         contexto_maestro,
-        few_shots=shots
+        few_shots=shots,
+        perfil=perfil_fs,
     )
     return state
 
