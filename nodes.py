@@ -640,8 +640,10 @@ async def nodo_maestro(state: OntomindState) -> OntomindState:
     # Few-shots dinámicos según perfil
     pos_vic   = state["reporte_victima"].get("posicion", "mixto")
     llave_fs  = state.get("dictamen", {}).get("llave_maestra", "")
-    shots     = seleccionar_few_shots(pos_vic, llave_fs, state.get("user_input", ""))
-    print(f"[FEW-SHOTS] Perfil: {pos_vic} | Llave: {llave_fs[:30]} | Shots: {len(shots)}")
+    # Dolor agudo tiene prioridad sobre posicion P-VICTIMA
+    perfil_fs = "dolor_agudo" if es_dolor_agudo else pos_vic
+    shots     = seleccionar_few_shots(perfil_fs, llave_fs, state.get("user_input", ""))
+    print(f"[FEW-SHOTS] Perfil: {perfil_fs} | Llave: {llave_fs[:30]} | Shots: {len(shots)}")
 
     state["respuesta"] = await llamar_llm_con_shots(
         prompt_maestro_enriquecido,
