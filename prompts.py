@@ -888,15 +888,23 @@ def seleccionar_few_shots(perfil: str, llave: str = "", user_input: str = "") ->
     """
     Devuelve la lista de (user, assistant) según el perfil detectado.
     perfil puede ser: dolor_agudo | juez_control | victima | protagonista | mixto | reflexivo
+
+    Prioridad de selección:
+    1. dolor_agudo  — señal explícita en perfil (máxima prioridad)
+    2. juez_control — señales en llave maestra o en el input
+    3. orgullo_herida — señales en llave maestra
+    4. victima      — posición víctima sin llave de poder
+    5. mixto        — divide entre victima y reflexivo (usa victima_estancada)
+    6. protagonista / reflexivo — default
     """
     ll = llave.lower()
     ui = user_input.lower()
 
-    # Dolor agudo — prioridad máxima cuando se pasa explícitamente
+    # 1. Dolor agudo — prioridad máxima
     if perfil == "dolor_agudo":
         return FEW_SHOTS["dolor_agudo"]
 
-    # Señales de perfil Juez/Control en llave o en el input
+    # 2. Señales Juez/Control en llave o en el input
     juez_llaves = ["juez", "control", "soberbia", "eficiencia", "incoherencia acto",
                    "declaración de no-posibilidad", "no-posibilidad", "estándares",
                    "excelencia", "profesionalidad", "hechos", "lógica"]
@@ -906,37 +914,19 @@ def seleccionar_few_shots(perfil: str, llave: str = "", user_input: str = "") ->
     if any(k in ll for k in juez_llaves) or any(k in ui for k in juez_input):
         return FEW_SHOTS["juez_control"]
 
+    # 3. Señales Orgullo/Herida en llave
     orgullo_llaves = ["orgullo", "dignidad", "herida", "herencia", "ganar", "perder",
                       "traición", "perdonar"]
     if any(k in ll for k in orgullo_llaves):
         return FEW_SHOTS["orgullo_herida"]
 
+    # 4-6. Mapeo por posición del observador
     if perfil == "victima":
         return FEW_SHOTS["victima_estancada"]
-    elif perfil == "protagonista":
-        return FEW_SHOTS["reflexivo"]
-    else:
-        return FEW_SHOTS["reflexivo"]
-
-    # Señales de perfil Juez/Control en llave o en el input
-    juez_llaves = ["juez", "control", "soberbia", "eficiencia", "incoherencia acto",
-                   "declaración de no-posibilidad", "no-posibilidad", "estándares",
-                   "excelencia", "profesionalidad", "hechos", "lógica"]
-    juez_input  = ["no puedo delegar", "kpis", "cada línea", "riesgo inasumible",
-                   "honestidad radical", "eficiencia", "nivel de exigencia",
-                   "estándares", "al 100%", "si no lo hago yo"]
-
-    if any(k in ll for k in juez_llaves) or any(k in ui for k in juez_input):
-        return FEW_SHOTS["juez_control"]
-
-    orgullo_llaves = ["orgullo", "dignidad", "herida", "herencia", "ganar", "perder",
-                      "traición", "perdonar"]
-    if any(k in ll for k in orgullo_llaves):
-        return FEW_SHOTS["orgullo_herida"]
-
-    if perfil == "victima":
+    elif perfil == "mixto":
+        # Mixto: culpa + resentimiento simultáneos → shots de víctima estancada
+        # porque el coach no debe validar ninguno de los dos lados
         return FEW_SHOTS["victima_estancada"]
-    elif perfil == "protagonista":
-        return FEW_SHOTS["reflexivo"]
     else:
+        # protagonista | reflexivo | cualquier perfil no mapeado
         return FEW_SHOTS["reflexivo"]
