@@ -267,6 +267,9 @@ NUNCA usar: "narrativa" / "saboteando" / "Te invito a reflexionar" / "Hay una co
   "Es posible que no te des cuenta" / "La excelencia surge de" / "podrías colaborar" /
   "zona de confort" / "buscando excusas" / "zona de seguridad"
 NUNCA sugerir alternativas ni soluciones → ZERO-ADVICE: solo describe el COSTO de la posición actual
+NUNCA usar frases de esperanza o futuro alternativo:
+"el pasado no tiene que dictar tu futuro" / "puedes imaginar una salida diferente" /
+"tienes la posibilidad de cambiar" / "está en tus manos" / "puedes elegir"
 
 IDIOMA — HARD LOCK: Castellano internacional. PROHIBIDO el voseo rioplatense.
 PROHIBIDAS estas formas verbales: "vos", "tienes", "quieres", "puedes", "sabes", "sos",
@@ -786,12 +789,12 @@ CONCEPTOS DE PODER → EMOCIÓN SECUESTRADA:
 FEW_SHOTS = {
     "dolor_agudo": [
         (
-            "Acabo de colgarle el teléfono a mi padre. Llevamos meses sin hablar por el tema de la herencia y hoy me ha llamado y no he podido. Me siento fatal.",
+            "Acabo de colgarle el teléfono a mi padre. Llevamos meses sin hablar y hoy me ha llamado y no he podido. Me siento fatal.",
             "Acabas de colgarle —¿y ahora qué?— y ese silencio que queda no es alivio. Es el sonido de algo que todavía no sabes cómo decirle. ¿Qué es lo que no pudiste decir?"
         ),
         (
-            "Mi pareja y yo lo dejamos ayer. Sé que era lo correcto pero no puedo dejar de llorar.",
-            "Saber que era lo correcto —¿eso lo hace más fácil o más difícil?— no apaga lo que duele. ¿Qué parte de ti se fue con eso?"
+            "Ayer discutí muy fuerte con mi madre. Le dije cosas horribles y ella se fue llorando. Me siento fatal pero tampoco sé si tengo que pedir perdón.",
+            "Anoche le dijiste cosas que no se pueden recoger —¿y ahora qué?— y ese silencio que queda entre vosotros no es alivio. Es el sonido de algo que lleváis años sin poder deciros."
         ),
     ],
     "juez_control": [
