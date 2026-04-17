@@ -52,6 +52,46 @@ async def root():
     return {"status": "ok", "servicio": "ONTOMIND API v1.0"}
 
 
+@app.post("/admin/dpo/guardar")
+async def guardar_par_dpo(request: Request):
+    """Guarda un par DPO desde el dashboard de etiquetado."""
+    try:
+        data = await request.json()
+        import httpx as _httpx
+        url  = SUPABASE_URL.strip()
+        key  = SUPABASE_KEY.strip()
+        async with _httpx.AsyncClient(timeout=15) as client:
+            r = await client.post(
+                f"{url}/rest/v1/pares_dpo",
+                headers={
+                    "apikey": key,
+                    "Authorization": "Bearer " + key,
+                    "Content-Type": "application/json",
+                    "Prefer": "return=representation"
+                },
+                json={
+                    "session_id":        data.get("session_id",""),
+                    "turno":             data.get("turno", 1),
+                    "user_code":         data.get("user_code","anonimo"),
+                    "user_input":        data.get("user_input",""),
+                    "perfil_detectado":  data.get("perfil_detectado",""),
+                    "llave_maestra":     data.get("llave_maestra",""),
+                    "protocolo":         data.get("protocolo","normal"),
+                    "respuesta_rejected": data.get("respuesta_rejected",""),
+                    "respuesta_chosen":   data.get("respuesta_chosen",""),
+                    "supervisor":        data.get("supervisor","admin"),
+                    "score_rejected":    data.get("score_rejected", 0),
+                    "notas":             data.get("notas",""),
+                    "categoria":         data.get("categoria","general"),
+                }
+            )
+        if r.status_code in (200, 201):
+            return {"ok": True, "id": r.json()[0].get("id") if r.json() else None}
+        return {"ok": False, "error": r.text[:100]}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
 @app.get("/health")
 async def health():
     return {"status": "healthy"}
@@ -200,7 +240,7 @@ async def proxy_tabla(tabla: str, limit: int = 100, params: str = ""):
     key  = os.getenv("SUPABASE_KEY","").strip()
     if not url or not key:
         return []
-    tablas_permitidas = {"log_nodos", "mapa_observador", "alertas_vigil", "evaluaciones_conversacion", "usuarios"}
+    tablas_permitidas = {"log_nodos", "mapa_observador", "alertas_vigil", "evaluaciones_conversacion", "usuarios", "pares_dpo"}
     if tabla not in tablas_permitidas:
         from fastapi import HTTPException
         raise HTTPException(status_code=403, detail="Tabla no permitida")
