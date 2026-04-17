@@ -608,10 +608,15 @@ async def nodo_maestro(state: OntomindState) -> OntomindState:
         "REFLEXIVO"
     )
 
+    # Cuando es dolor_agudo, la posicion P-VICTIMA puede ser "protagonista"
+    # (el usuario asume culpa) — esto es una señal falsa para el Maestro.
+    # Enmascaramos pos_vict en el contexto para evitar el sesgo Juez/Control.
+    pos_vict_display = "mixto (culpa/dolor)" if es_dolor_agudo else pos_vict
+
     contexto_maestro = (
         f"PROTOCOLO ACTIVO: {protocolo}\n"
         f"DELTA OBSERVADOR: {delta}\n"
-        f"PERFIL DETECTADO: {perfil_label} | posicion={pos_vict} | "
+        f"PERFIL DETECTADO: {perfil_label} | posicion={pos_vict_display} | "
         f"dominio={dominio_q}\n\n"
         f"CONCEPTOS CLAVE (NO son texto a reproducir):\n"
         f"- Llave maestra: {dictamen_limpio['llave_maestra']}\n"
@@ -622,6 +627,19 @@ async def nodo_maestro(state: OntomindState) -> OntomindState:
         f"MENSAJE ORIGINAL DEL USUARIO:\n{state['user_input']}\n\n"
         f"{instruccion_preguntas}"
     )
+
+    # Instrucción reforzada para dolor_agudo — el modelo tiende a ignorar
+    # la Regla 3 cuando recibe posicion=protagonista del detector P-VICTIMA.
+    if es_dolor_agudo:
+        contexto_maestro += (
+            "\n\nINSTRUCCIÓN CRÍTICA — DOLOR AGUDO CONFIRMADO:\n"
+            "1. PRIMERA FRASE: nombra lo que ocurrió (el hecho doloroso), no quién es el usuario.\n"
+            "2. PROHIBIDO: zarpazo de identidad antes de tocar el dolor.\n"
+            "3. PROHIBIDO: diagnósticos ('postura de víctima', 'elección', 'miedo a...').\n"
+            "4. ESTRUCTURA OBLIGATORIA: [hecho] —[zarpazo suave]— [pregunta de vacío]\n"
+            "5. EJEMPLO CORRECTO: 'Anoche le dijiste cosas que no se pueden recoger. ¿Y ahora qué?'\n"
+            "6. EJEMPLO INCORRECTO: '¿Quién eres tú cuando mantienes esa culpa?' (zarpazo prematuro)"
+        )
 
     if delta == "transformacion":
         contexto_maestro += (
@@ -651,18 +669,17 @@ async def nodo_maestro(state: OntomindState) -> OntomindState:
     nivel_riesgo = state.get("nivel_riesgo", "ninguno")
     llave        = state.get("dictamen", {}).get("llave_maestra", "")
 
-    # Inyectar siempre: Pinotti P1-P4 (patrones base)
-    # + Golden Standard del perfil detectado
-    if pos_victima == "protagonista":
-        seccion_ref = DOCUMENTO_REFERENCIA_MAESTRO  # completo si hay avance
+    # PRIORIDAD ABSOLUTA: es_dolor_agudo anula cualquier lectura de pos_victima.
+    # Cuando el usuario asume culpa propia, P-VICTIMA lo clasifica como
+    # "protagonista", lo que antes inyectaba el Golden Standard Juez/Control
+    # y sobreescribia el perfil real. Este bloque lo previene.
+    if es_dolor_agudo:
+        seccion_ref = DOCUMENTO_REFERENCIA_MAESTRO
     elif "Juez" in llave or "Control" in llave or "Soberbia" in llave or protocolo == "incoherencia":
-        # Perfil Juez: Pinotti + Golden Juez/Control
         seccion_ref = DOCUMENTO_REFERENCIA_MAESTRO
     elif nivel_riesgo in ("alto", "critico"):
-        # Dolor agudo o crisis: Pinotti + Golden Dolor
         seccion_ref = DOCUMENTO_REFERENCIA_MAESTRO
-    elif pos_victima == "victima":
-        # Víctima estancada: completo
+    elif pos_victima in ("victima", "protagonista"):
         seccion_ref = DOCUMENTO_REFERENCIA_MAESTRO
     else:
         # Caso general: solo los 6 patrones Pinotti (Prioridad 1)
