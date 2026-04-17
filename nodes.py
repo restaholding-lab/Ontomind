@@ -300,6 +300,13 @@ async def nodo_triple_filtro_vigil(state: OntomindState) -> OntomindState:
     if daño_inminente:
         nivel = "critico"
 
+    # FILTRO FALSO POSITIVO: tokens de vocabulario ontológico/laboral
+    # nunca superan nivel "latente" aunque haya otros indicadores
+    if es_falso_positivo and not daño_inminente:
+        if nivel in ("alto", "critico"):
+            nivel = "latente"
+            print(f"[VIGIL] Falso positivo detectado — nivel reducido a latente")
+
     # HARD-LOCK 2: Crisis existencial COMPLETA requiere 3 señales simultáneas
     # (dominio vital + víctima muy alta + sin llave maestra de coaching)
     elif dominio_actual in dominios_colapso and conf_victima_actual > 0.85 and not hay_llave_maestra:
@@ -311,6 +318,17 @@ async def nodo_triple_filtro_vigil(state: OntomindState) -> OntomindState:
         "no puedo mas", "no puedo más", "ya no puedo", "no tengo fuerzas",
         "sin salida", "no hay salida", "bucle sin salida", "le colgue", "le colgué"
     }
+    # Tokens EXCLUIDOS de frustración — confirmados como falsos positivos:
+    # "atrapado", "asfixiando", "cerrando el espacio", "asfixia", "estoy atrapado"
+    # son lenguaje de estancamiento laboral/relacional, NO de crisis.
+    tokens_falso_positivo = {
+        "estoy atrapado", "me siento atrapado", "atrapado en",
+        "asfixiando", "me está asfixiando", "cerrando el espacio",
+        "validar mi identidad", "transformar mi escucha",
+        "brecha de efectividad", "no-posibilidad", "llave maestra"
+    }
+    # Si el mensaje contiene tokens de falso positivo, reducir nivel máximo a latente
+    es_falso_positivo = any(t in texto for t in tokens_falso_positivo)
     tokens_rechazo_ayuda = {
         "no me preguntes", "dejar constancia", "no quiero ayuda", "nadie me ayude"
     }
