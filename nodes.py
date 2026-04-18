@@ -834,8 +834,9 @@ async def nodo_evaluador_conversacion(state: OntomindState) -> OntomindState:
         )
 
         raw = await llamar_llm(prompt, "", temperatura=0.2)
-        # Parser JSON — más robusto que CSV para campos con texto libre
+        print(f"[EVAL-CONV RAW] {raw[:300]}")
         ev_conv = await parsear_json(raw)
+        print(f"[EVAL-CONV JSON] score={ev_conv.get('score_condiciones','?')} semilla={str(ev_conv.get('semilla_plantada','?'))[:50]}")
 
         def sg(key, default=""): return str(ev_conv.get(key, default)).strip()
         def sb_conv(key): 
