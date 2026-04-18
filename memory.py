@@ -117,7 +117,10 @@ class MapaObservador:
             print(f"[Supabase] Error registrar_log_nodos: {e}")
 
     async def guardar_evaluacion_conversacion(self, session_id: str, user_code: str, datos: dict):
-        """Guarda o actualiza la evaluación del arco conversacional completo."""
+        """
+        Guarda la evaluación longitudinal del arco conversacional.
+        Marco: Condiciones de Transformación Sostenida (18 Abr 2026).
+        """
         try:
             import httpx
             url = SUPABASE_URL.strip()
@@ -136,17 +139,19 @@ class MapaObservador:
                         "user_code":               user_code,
                         "timestamp":               datetime.utcnow().isoformat(),
                         "total_turnos":            datos.get("total_turnos", 0),
-                        "score_transformacion":    datos.get("score_transformacion", 0),
                         "posicion_inicial":        datos.get("posicion_inicial", "victima"),
                         "posicion_final":          datos.get("posicion_final", "victima"),
                         "arco_detectado":          datos.get("arco_detectado", "estable"),
-                        "turno_quiebre":           datos.get("turno_quiebre", 0),
+                        "score_condiciones":       datos.get("score_condiciones", 0),
+                        "posibilidad_nueva":       datos.get("posibilidad_nueva", False),
+                        "creencia_en_movimiento":  datos.get("creencia_en_movimiento", "no"),
+                        "reconocimiento_quiebre":  datos.get("reconocimiento_quiebre", "ninguno"),
+                        "semilla_plantada":        datos.get("semilla_plantada", ""),
                         "declaracion_detectada":   datos.get("declaracion_detectada", False),
                         "declaracion_texto":       datos.get("declaracion_texto", ""),
                         "llave_maestra_dominante": datos.get("llave_maestra_dominante", ""),
                         "protocolo_dominante":     datos.get("protocolo_dominante", "normal"),
                         "nivel_riesgo_max":        datos.get("nivel_riesgo_max", "ninguno"),
-                        "dictamen_conversacion":   datos.get("dictamen_conversacion", ""),
                         "recomendacion":           datos.get("recomendacion", ""),
                     }
                 )
