@@ -555,7 +555,7 @@ PENALIZADORES (se restan del score base):
   debía encontrar solo?
 
 Devuelve EXACTAMENTE este JSON (sin texto fuera del JSON):
-{
+{{
   "apertura_posibilidad": <0-15>,
   "escucha_activa": <0-15>,
   "emocion_indicador": <0-10>,
@@ -569,7 +569,7 @@ Devuelve EXACTAMENTE este JSON (sin texto fuera del JSON):
   "cierre_prematuro": <true|false>,
   "score_total": <suma dimensiones - penalizadores, mínimo 0, máximo 75>,
   "nota_evaluador": "<una frase sobre qué condición de transformación dominó o faltó>"
-}
+}}
 """
 
 
