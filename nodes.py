@@ -727,66 +727,60 @@ async def nodo_evaluador(state: OntomindState) -> OntomindState:
         hay_historial = len(resp_previas) >= 2
         prev_txt = " | ".join(resp_previas) if hay_historial else "primera_respuesta_sin_historial"
 
-        prompt = (
-            "Evalua esta respuesta de coaching ontologico en UNA SOLA LINEA CSV.\n"
-            "Usuario: " + state.get("user_input", "")[:200] + "\n"
-            "Coach: " + state.get("respuesta", "")[:300] + "\n"
-            "Turnos previos: " + prev_txt + "\n\n"
-            "RESPONDE SOLO con 11 numeros/valores separados por COMA, sin texto adicional:\n"
-            "escucha_sombras(0-15), zarpazo_intercalado(0-10), espejo_crudo(0-10), hacia_declaracion(0-5), "
-            "patron_repetitivo(0/1), brevedad_impacto(0/1), arrogancia_intelectual(0/1), "
-            "lenguaje_manual(0/1), rotundidad_seca(0/1), zarpazo_identidad(0/1), nota_breve\n"
-            "REGLAS:\n"
-            "- escucha_sombras ALTO si: toca la emocion real, no usa 'Te escucho' ni 'Entiendo que'\n"
-            "- zarpazo_intercalado ALTO si: pregunta de maximo 5 palabras EN MITAD de frase con guiones\n"
-            "- espejo_crudo ALTO si: traduce concepto blando (responsabilidad/dignidad/paz) a emocion oculta\n"
-            "- hacia_declaracion ALTO si: cierra con pregunta que abre vacio sin respuesta implicita\n"
-            "- patron_repetitivo=1 SOLO si hay historial previo Y la estructura inicio+fin es identica a turnos anteriores. Si turnos_previos='primera_respuesta_sin_historial' entonces patron_repetitivo=0 SIEMPRE\n"
-            "- arrogancia=1 si usa: 'narrativa','saboteando','Te invito','Es posible que no te des cuenta','zona de confort'\n"
-            "- lenguaje_manual=1 si sugiere solucion: delegar, colaborar, confiar en el equipo, buscar ayuda, dar el paso\n"
-            "- rotundidad_seca=1 si nombra ira/rabia/soberbia/miedo sin suavizantes\n"
-            "- zarpazo_identidad=1 si la pregunta intercalada ataca quien es (no que hace)\n"
-            "Ejemplo turno 1: 10,8,7,4,0,1,0,0,1,1,Zarpazo de identidad efectivo con espejo crudo"
+        # Nuevo evaluador — Marco de Transformación Sostenida
+        # Usa el PROMPT_EVALUADOR renovado (7 dimensiones + 4 penalizadores)
+        # Score máximo: 75
+        from prompts import PROMPT_EVALUADOR
+        prompt_eval = PROMPT_EVALUADOR.format(
+            user_input=state.get("user_input", "")[:300],
+            respuesta_maestro=state.get("respuesta", "")[:400],
+            protocolo=state.get("protocolo", "normal")
         )
-        raw = await llamar_llm(prompt, "", temperatura=0.1)
-        raw = raw.strip().replace("\n", " ")
-        parts = raw.split(",", 5)
-        def safe_int(v, default=0, max_val=10):
-            try: return max(0, min(max_val, int(str(v).strip())))
+        raw = await llamar_llm(prompt_eval, "", temperatura=0.1)
+
+        # Parsear JSON del evaluador
+        eval_data = await parsear_json(raw)
+
+        def si(key, default=0, max_val=10):
+            try: return max(0, min(max_val, int(eval_data.get(key, default))))
             except: return default
-        # Nuevas metricas: escucha_sombras, zarpazo_intercalado, espejo_crudo, hacia_declaracion,
-        # patron_repetitivo, brevedad_impacto, arrogancia_intelectual, nota
-        es  = safe_int(parts[0] if len(parts)>0 else 0, max_val=15)
-        zi  = safe_int(parts[1] if len(parts)>1 else 0)
-        ec  = safe_int(parts[2] if len(parts)>2 else 0)
-        hd  = safe_int(parts[3] if len(parts)>3 else 0, max_val=5)
-        rep = str(parts[4]).strip() == "1" if len(parts)>4 else False
-        brv = str(parts[5]).strip() == "1" if len(parts)>5 else False
-        arrog  = str(parts[6]).strip() == "1" if len(parts)>6 else False
-        lm     = str(parts[7]).strip() == "1" if len(parts)>7 else False
-        rots   = str(parts[8]).strip() == "1" if len(parts)>8 else False
-        zid    = str(parts[9]).strip() == "1" if len(parts)>9 else False
-        nota   = str(parts[10]).strip() if len(parts)>10 else "Sin nota"
-        # Score: base + bonificaciones - penalizaciones
-        base  = es + zi + ec + hd
-        bonus = (10 if brv else 0) + (15 if rots else 0) + (5 if zid else 0)
-        penal = (15 if rep else 0) + (20 if arrog else 0) + (20 if lm else 0)
-        total = base + bonus - penal
+        def sb(key):
+            v = eval_data.get(key, False)
+            return bool(v) if isinstance(v, bool) else str(v).lower() in ("true","1","yes","sí")
+
+        ap  = si("apertura_posibilidad",   max_val=15)
+        ea  = si("escucha_activa",         max_val=15)
+        ei  = si("emocion_indicador",      max_val=10)
+        ic  = si("incomodidad_calibrada",  max_val=10)
+        ld  = si("lenguaje_devuelto",      max_val=10)
+        ac  = si("acompañamiento",         max_val=10)
+        ce  = si("compromiso_emergente",   max_val=5)
+        lm  = sb("lenguaje_manual")
+        arr = sb("arrogancia_intelectual")
+        ej  = sb("emocion_juzgada")
+        cp  = sb("cierre_prematuro")
+        nota = str(eval_data.get("nota_evaluador", "Sin nota"))[:120]
+
+        base  = ap + ea + ei + ic + ld + ac + ce
+        penal = (20 if lm else 0) + (20 if arr else 0) + (10 if ej else 0) + (15 if cp else 0)
+        total = max(0, base - penal)
+
         state["evaluacion"] = {
-            "escucha_sombras":        es,
-            "zarpazo_intercalado":    zi,
-            "espejo_crudo":           ec,
-            "hacia_declaracion":      hd,
-            "brevedad_impacto":       brv,
-            "patron_repetitivo":      rep,
-            "arrogancia_intelectual": arrog,
+            "apertura_posibilidad":   ap,
+            "escucha_activa":         ea,
+            "emocion_indicador":      ei,
+            "incomodidad_calibrada":  ic,
+            "lenguaje_devuelto":      ld,
+            "acompañamiento":         ac,
+            "compromiso_emergente":   ce,
             "lenguaje_manual":        lm,
-            "rotundidad_seca":        rots,
-            "zarpazo_identidad":      zid,
-            "score_total":            max(0, total),
+            "arrogancia_intelectual": arr,
+            "emocion_juzgada":        ej,
+            "cierre_prematuro":       cp,
+            "score_total":            total,
             "nota_evaluador":         nota
         }
-        print(f"[EVALUADOR] Score: {max(0,total)}/55 | ZI:{zi} RS:{rots} ZID:{zid} LM:{lm} Arr:{arrog} | {nota}")
+        print(f"[EVALUADOR] Score: {total}/75 | AP:{ap} EA:{ea} IC:{ic} LD:{ld} | LM:{lm} EJ:{ej} CP:{cp} | {nota}")
     except Exception as e:
         print(f"[EVALUADOR] Error: {e}")
         state["evaluacion"] = {
@@ -841,7 +835,8 @@ async def nodo_evaluador_conversacion(state: OntomindState) -> OntomindState:
 
         raw = await llamar_llm(prompt, "", temperatura=0.2)
         raw = raw.strip().replace("\n", " ")
-        parts = raw.split("|", 10)
+        # Nuevo formato CSV: 13 campos
+        parts = raw.split("|", 12)
 
         def sp(i, default=""): return str(parts[i]).strip() if len(parts) > i else default
         def si(i, default=0):
@@ -849,23 +844,25 @@ async def nodo_evaluador_conversacion(state: OntomindState) -> OntomindState:
             except: return default
 
         datos = {
-            "total_turnos":            state.get("turno_actual", 1),
-            "posicion_inicial":        sp(0, "victima"),
-            "posicion_final":          sp(1, "victima"),
-            "arco_detectado":          sp(2, "estable"),
-            "score_transformacion":    si(3, 10),
-            "turno_quiebre":           si(4, 0),
-            "declaracion_detectada":   sp(5, "no").lower() == "si",
-            "declaracion_texto":       sp(6, ""),
-            "llave_maestra_dominante": sp(7, ""),
-            "nivel_riesgo_max":        sp(8, "ninguno"),
-            "dictamen_conversacion":   sp(9, ""),
-            "recomendacion":           sp(10, ""),
-            "protocolo_dominante":     state.get("protocolo", "normal"),
+            "total_turnos":             state.get("turno_actual", 1),
+            "posicion_inicial":         sp(0, "victima"),
+            "posicion_final":           sp(1, "victima"),
+            "arco_detectado":           sp(2, "estable"),
+            "posibilidad_nueva":        sp(3, "no").lower() == "si",
+            "creencia_en_movimiento":   sp(4, "no"),
+            "reconocimiento_quiebre":   sp(5, "ninguno"),
+            "declaracion_detectada":    sp(6, "no").lower() == "si",
+            "declaracion_texto":        sp(7, ""),
+            "semilla_plantada":         sp(8, "no"),
+            "llave_maestra_dominante":  sp(9, ""),
+            "nivel_riesgo_max":         sp(10, "ninguno"),
+            "score_condiciones":        si(11, 10),
+            "recomendacion":            sp(12, ""),
+            "protocolo_dominante":      state.get("protocolo", "normal"),
         }
 
         state["evaluacion_conversacion"] = datos
-        print(f"[EVAL-CONV] Score: {datos['score_transformacion']}/100 | Arco: {datos['arco_detectado']} | {datos['dictamen_conversacion'][:60]}")
+        print(f"[EVAL-CONV] Score: {datos['score_condiciones']}/100 | Arco: {datos['arco_detectado']} | Semilla: {datos['semilla_plantada'][:40]}")
 
     except Exception as e:
         print(f"[EVAL-CONV] Error: {e}")
