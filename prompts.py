@@ -659,11 +659,22 @@ EVALÚA ESTAS 10 DIMENSIONES:
     ¿Qué debería sostener o profundizar ONTOMIND en la siguiente sesión?
     No qué resolver — qué seguir acompañando.
 
-Responde SOLO con este formato CSV (sin saltos de línea, sin explicaciones):
-posicion_inicial|posicion_final|arco|posibilidad_nueva|creencia_movimiento|reconocimiento_quiebre|declaracion_si_no|declaracion_texto|semilla_plantada|llave_maestra|nivel_riesgo_max|score_condiciones|recomendacion
-
-Ejemplo:
-victima|mixto|avance|si|si — el juicio sobre su ex empieza a tambalearse|parcial|si|Creo que podría hablarle diferente|si — la pregunta sobre qué tipo de relación quiere realmente|Fundamentación de Juicios|ninguno|48|Sostener la tensión entre lo que declara y lo que hace. No resolver la ambivalencia — habitarla."""
+Responde ÚNICAMENTE con este JSON (sin texto fuera del JSON):
+{{
+  "posicion_inicial": "victima|mixto|protagonista",
+  "posicion_final": "victima|mixto|protagonista",
+  "arco_detectado": "regresion|estable|avance|transformacion",
+  "posibilidad_nueva": true|false,
+  "creencia_en_movimiento": "no — descripción breve si hay movimiento",
+  "reconocimiento_quiebre": "ninguno|parcial|claro",
+  "declaracion_detectada": true|false,
+  "declaracion_texto": "extracto exacto o vacío",
+  "semilla_plantada": "no — o descripción de qué quedó abierto",
+  "llave_maestra_dominante": "nombre de la distinción",
+  "nivel_riesgo_max": "ninguno|latente|alto|critico",
+  "score_condiciones": <0-100>,
+  "recomendacion": "1-2 frases sobre qué sostener en la siguiente sesión"
+}}"""
 
 
 

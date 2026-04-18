@@ -834,30 +834,33 @@ async def nodo_evaluador_conversacion(state: OntomindState) -> OntomindState:
         )
 
         raw = await llamar_llm(prompt, "", temperatura=0.2)
-        raw = raw.strip().replace("\n", " ")
-        # Nuevo formato CSV: 13 campos
-        parts = raw.split("|", 12)
+        # Parser JSON — más robusto que CSV para campos con texto libre
+        ev_conv = await parsear_json(raw)
 
-        def sp(i, default=""): return str(parts[i]).strip() if len(parts) > i else default
-        def si(i, default=0):
-            try: return max(0, min(100, int(sp(i, str(default)))))
+        def sg(key, default=""): return str(ev_conv.get(key, default)).strip()
+        def sb_conv(key): 
+            v = ev_conv.get(key, False)
+            if isinstance(v, bool): return v
+            return str(v).lower() in ("true","si","sí","yes","1")
+        def si_conv(key, default=0):
+            try: return max(0, min(100, int(ev_conv.get(key, default))))
             except: return default
 
         datos = {
             "total_turnos":             state.get("turno_actual", 1),
-            "posicion_inicial":         sp(0, "victima"),
-            "posicion_final":           sp(1, "victima"),
-            "arco_detectado":           sp(2, "estable"),
-            "posibilidad_nueva":        sp(3, "no").lower() == "si",
-            "creencia_en_movimiento":   sp(4, "no"),
-            "reconocimiento_quiebre":   sp(5, "ninguno"),
-            "declaracion_detectada":    sp(6, "no").lower() == "si",
-            "declaracion_texto":        sp(7, ""),
-            "semilla_plantada":         sp(8, "no"),
-            "llave_maestra_dominante":  sp(9, ""),
-            "nivel_riesgo_max":         sp(10, "ninguno"),
-            "score_condiciones":        si(11, 10),
-            "recomendacion":            sp(12, ""),
+            "posicion_inicial":         sg("posicion_inicial", "victima"),
+            "posicion_final":           sg("posicion_final", "victima"),
+            "arco_detectado":           sg("arco_detectado", "estable"),
+            "posibilidad_nueva":        sb_conv("posibilidad_nueva"),
+            "creencia_en_movimiento":   sg("creencia_en_movimiento", "no"),
+            "reconocimiento_quiebre":   sg("reconocimiento_quiebre", "ninguno"),
+            "declaracion_detectada":    sb_conv("declaracion_detectada"),
+            "declaracion_texto":        sg("declaracion_texto", ""),
+            "semilla_plantada":         sg("semilla_plantada", ""),
+            "llave_maestra_dominante":  sg("llave_maestra_dominante", ""),
+            "nivel_riesgo_max":         sg("nivel_riesgo_max", "ninguno"),
+            "score_condiciones":        si_conv("score_condiciones", 10),
+            "recomendacion":            sg("recomendacion", ""),
             "protocolo_dominante":      state.get("protocolo", "normal"),
         }
 
