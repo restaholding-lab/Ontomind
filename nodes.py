@@ -126,11 +126,14 @@ async def llamar_llm_con_shots(system: str, user: str,
 
     messages = [{"role": "system", "content": system}]
 
-    # Inyectar few-shots como contexto de imitación
+    # Inyectar few-shots como ejemplos de estilo — marcados explícitamente
+    # para que el modelo no los confunda con historial real de conversación
     if few_shots:
-        for user_ex, asst_ex in few_shots[:2]:  # máx 2 ejemplos
-            messages.append({"role": "user",      "content": user_ex})
-            messages.append({"role": "assistant", "content": asst_ex})
+        for user_ex, asst_ex in few_shots[:2]:
+            messages.append({"role": "user",
+                             "content": "[EJEMPLO DE ESTILO — NO ES EL USUARIO ACTUAL]\n" + user_ex})
+            messages.append({"role": "assistant",
+                             "content": asst_ex})
 
     # Input real del usuario
     messages.append({"role": "user", "content": user})
