@@ -120,20 +120,22 @@ async def llamar_llm_con_shots(system: str, user: str,
     genéricas ("Entiendo que...", "Parece que...") heredadas del RLHF.
     """
     # Mapa de prefill por perfil: token que fuerza el primer token de respuesta
+    # La raya tipográfica (—) fuerza castellano internacional desde el primer token
+    # ya que GPT-4o-mini tiende al voseo cuando genera libremente.
     PREFILL_POR_PERFIL = {
-        "dolor_agudo": "—",
+        "dolor_agudo":   "—",
+        "juez_control":  "—",
+        "mixto":         "—",
+        "victima":       "—",
+        "protagonista":  "—",
+        "reflexivo":     "—",
     }
 
     messages = [{"role": "system", "content": system}]
 
-    # Inyectar few-shots como ejemplos de estilo — marcados explícitamente
-    # para que el modelo no los confunda con historial real de conversación
-    if few_shots:
-        for user_ex, asst_ex in few_shots[:2]:
-            messages.append({"role": "user",
-                             "content": "[EJEMPLO DE ESTILO — NO ES EL USUARIO ACTUAL]\n" + user_ex})
-            messages.append({"role": "assistant",
-                             "content": asst_ex})
+    # Few-shots eliminados — GPT-4o-mini los confunde con historial real.
+    # El Maestro opera solo con PROMPT_MAESTRO + DOCUMENTO_REFERENCIA + prefill.
+    # Los few-shots se reservan para el fine-tuning de Qwen2.5-14B (fase DPO).
 
     # Input real del usuario
     messages.append({"role": "user", "content": user})
@@ -213,10 +215,17 @@ async def nodo_clasificar_input(state: OntomindState) -> OntomindState:
     tokens_silencio = {"no sé", "no se", "no lo sé", "quizás", "tal vez",
                        "no", "nada", "da igual", "...", "no sé qué decir"}
 
+    # Silencio SOLO si el input es mínimo Y no contiene contenido emocional real
+    # "Me siento fatal hoy" NO es silencio — es una declaración emocional de 4 palabras
+    tiene_contenido_emocional = any(w in texto.lower() for w in [
+        "siento", "fatal", "mal", "bien", "miedo", "dolor", "triste",
+        "solo", "sola", "perdido", "perdida", "cansado", "cansada",
+        "culpa", "vergüenza", "rabia", "enfado", "llorar", "lloro"
+    ])
+
     es_silencio = (
-        len(tokens) < 5 or
-        texto.lower() in tokens_silencio or
-        len(texto) < 15
+        (len(tokens) < 4 or texto.lower() in tokens_silencio or len(texto) < 10)
+        and not tiene_contenido_emocional
     )
     state["protocolo"] = "silencio" if es_silencio else "normal"
     return state
