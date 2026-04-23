@@ -216,6 +216,61 @@ class MapaObservador:
         except Exception as e:
             print(f"[Supabase] Error upsert_usuario: {e}")
 
+
+    async def verificar_cadencia_dpo(self, user_code: str = "admin") -> dict:
+        """
+        Modificación 2 — Cadencia de fine-tuning iterativo.
+        Comprueba cuántos pares DPO validados hay en Supabase.
+        Alerta cuando se alcanza un múltiplo de 200 (umbral de entrenamiento).
+        Devuelve dict con total, umbral_alcanzado y recomendacion.
+        """
+        try:
+            import httpx
+            url = SUPABASE_URL.strip()
+            key = SUPABASE_KEY.strip()
+            async with httpx.AsyncClient(timeout=15) as client:
+                r = await client.get(
+                    f"{url}/rest/v1/pares_dpo?validado=eq.true&select=id",
+                    headers={
+                        "apikey": key,
+                        "Authorization": "Bearer " + key,
+                        "Prefer": "count=exact"
+                    }
+                )
+                total = int(r.headers.get("content-range", "0/0").split("/")[-1])
+
+            UMBRAL = 200
+            ciclo_actual   = total // UMBRAL
+            siguiente_hito = (ciclo_actual + 1) * UMBRAL
+            faltan         = siguiente_hito - total
+            umbral_alcanzado = (total > 0 and total % UMBRAL == 0)
+
+            resultado = {
+                "total_pares":        total,
+                "ciclo_actual":       ciclo_actual,
+                "siguiente_hito":     siguiente_hito,
+                "faltan_para_hito":   faltan,
+                "umbral_alcanzado":   umbral_alcanzado,
+                "recomendacion":      (
+                    f"LISTO PARA ENTRENAMIENTO — {total} pares validados. "
+                    f"Ejecutar fine-tuning ciclo {ciclo_actual}."
+                    if umbral_alcanzado else
+                    f"Faltan {faltan} pares para el próximo entrenamiento "
+                    f"(hito: {siguiente_hito})."
+                )
+            }
+
+            if umbral_alcanzado:
+                print(f"[DPO] ALERTA: {total} pares — umbral de entrenamiento alcanzado.")
+            else:
+                print(f"[DPO] {total} pares validados — faltan {faltan} para hito {siguiente_hito}.")
+
+            return resultado
+
+        except Exception as e:
+            print(f"[DPO] Error verificar_cadencia_dpo: {e}")
+            return {"total_pares": 0, "umbral_alcanzado": False, "recomendacion": f"Error: {e}"}
+
     def _vacio(self, session_id):
         return {
             "session_id":           session_id,

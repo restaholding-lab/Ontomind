@@ -13,12 +13,29 @@ EMBED_MODEL    = "text-embedding-3-small"
 
 # Mapa nodo → colección Qdrant
 NODO_COLECCION = {
-    "e_actos":      "ontomind_e_actos",
-    "e_juicios":    "ontomind_e_juicios",
-    "p_quiebre":    "ontomind_p_quiebre",
-    "p_victima":    "ontomind_p_victima",
-    "distinciones": "ontomind_distinciones",
+    "e_actos":               "ontomind_e_actos",
+    "e_juicios":             "ontomind_e_juicios",
+    "p_quiebre":             "ontomind_p_quiebre",
+    "p_victima":             "ontomind_p_victima",
+    "distinciones":          "ontomind_distinciones",
+    "patron_conversacional": "ontomind_patron_conversacional",  # ← NUEVO
 }
+
+# Etiquetas legibles por fuente — para el prompt del Maestro
+ETIQUETA_FUENTE = {
+    "sesion_zoom_coaches":   "Sesión real de coaches (corpus base)",
+    "sesion_zoom_video1":    "Sesión real — fragmento manual",
+    "sesion_zoom_video2":    "Sesión real — fragmento manual",
+    "sesion_zoom_video3":    "Sesión real — fragmento manual",
+}
+
+def _etiqueta_fuente(fuente: str) -> str:
+    """Convierte el campo fuente en una etiqueta legible."""
+    if fuente in ETIQUETA_FUENTE:
+        return ETIQUETA_FUENTE[fuente]
+    if fuente.startswith("sesion_zoom_"):
+        return "Sesión real de coaches (video)"
+    return fuente or "corpus"
 
 
 async def embed_texto(texto: str) -> list[float]:
@@ -47,14 +64,14 @@ async def recuperar_contexto(
     Recupera los fragmentos más relevantes del corpus para un nodo.
 
     Args:
-        nodo: nombre del nodo ("e_actos", "e_juicios", etc.)
+        nodo: nombre del nodo ("e_actos", "e_juicios", "patron_conversacional", etc.)
         query: texto de búsqueda
         top_k: número de resultados
         filtro_autor: "echeverria" | "pinotti" | None (todos)
         solo_conversacional: si True, filtra chunks teóricos (tipo_tono != teorico)
-    
+
     Returns:
-        Lista de dicts con "texto", "autor", "score", "fuente"
+        Lista de dicts con "texto", "autor", "score", "fuente", "dimension", "momento"
     """
     coleccion = NODO_COLECCION.get(nodo)
     if not coleccion:
@@ -70,14 +87,12 @@ async def recuperar_contexto(
             "score_threshold": 0.35
         }
 
-        # Construir filtros combinados
         filtros_must     = []
         filtros_must_not = []
 
         if filtro_autor:
             filtros_must.append({"key": "autor", "match": {"value": filtro_autor}})
 
-        # Filtro de tono: excluir teórico en coaching normal
         if solo_conversacional:
             filtros_must_not.append({"key": "tipo_tono", "match": {"value": "teorico"}})
 
@@ -97,10 +112,8 @@ async def recuperar_contexto(
                 },
                 json=body
             )
-            # Si falla con filtro (400), reintenta sin filtro de tono
             if r.status_code == 400 and "filter" in body:
                 body_sin_filtro = {k: v for k, v in body.items() if k != "filter"}
-                # Mantener filtro de autor si lo hay
                 if filtro_autor:
                     body_sin_filtro["filter"] = {
                         "must": [{"key": "autor", "match": {"value": filtro_autor}}]
@@ -116,15 +129,35 @@ async def recuperar_contexto(
             r.raise_for_status()
             resultados = r.json().get("result", [])
 
-        return [
-            {
-                "texto":  res["payload"].get("text", "")[:600],
-                "autor":  res["payload"].get("autor", "desconocido"),
-                "fuente": res["payload"].get("filename", ""),
-                "score":  res.get("score", 0)
-            }
-            for res in resultados
-        ]
+        fragmentos = []
+        for res in resultados:
+            payload = res["payload"]
+            # Extraer fuente — campo varía según colección
+            fuente_raw = (
+                payload.get("fuente") or          # ontomind_patron_conversacional
+                payload.get("filename") or         # colecciones antiguas
+                "corpus"
+            )
+            # Extraer texto — campo varía según colección
+            texto = (
+                payload.get("dialogo") or          # patron_conversacional
+                payload.get("text") or             # colecciones antiguas
+                payload.get("coach_primera") or
+                ""
+            )[:600]
+
+            fragmentos.append({
+                "texto":     texto,
+                "autor":     payload.get("autor", "coach"),
+                "fuente":    fuente_raw,
+                "fuente_label": _etiqueta_fuente(fuente_raw),
+                "dimension": payload.get("dimension_principal", ""),
+                "momento":   payload.get("momento_transformacion", ""),
+                "patron":    payload.get("patron_coach", ""),
+                "score":     res.get("score", 0)
+            })
+
+        return fragmentos
 
     except Exception as e:
         print(f"[RAG] Error en nodo {nodo}: {e}")
@@ -132,14 +165,30 @@ async def recuperar_contexto(
 
 
 def formatear_contexto(fragmentos: list[dict]) -> str:
-    """Formatea los fragmentos recuperados para incluir en el prompt."""
+    """
+    Formatea los fragmentos recuperados para incluir en el prompt del Maestro.
+    Incluye la fuente para que el modelo sepa si viene de una sesión real o del corpus base.
+    """
     if not fragmentos:
         return "Sin contexto recuperado del corpus."
-    
+
     partes = []
     for i, f in enumerate(fragmentos, 1):
-        partes.append(
-            f"[Fragmento {i} — {f['autor'].upper()} | score: {f['score']:.2f}]\n"
-            f"{f['texto']}"
-        )
+        # Cabecera con fuente identificada
+        fuente_label = f.get("fuente_label") or f.get("fuente") or "corpus"
+        dimension    = f.get("dimension", "")
+        momento      = f.get("momento", "")
+        patron       = f.get("patron", "")
+
+        meta = f"[Fragmento {i} — {fuente_label}"
+        if dimension:
+            meta += f" | {dimension}"
+        if momento:
+            meta += f" | momento: {momento}"
+        if patron:
+            meta += f" | patrón: {patron}"
+        meta += f" | score: {f['score']:.2f}]"
+
+        partes.append(f"{meta}\n{f['texto']}")
+
     return "\n\n".join(partes)
