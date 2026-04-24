@@ -223,11 +223,39 @@ async def nodo_clasificar_input(state: OntomindState) -> OntomindState:
         "culpa", "vergüenza", "rabia", "enfado", "llorar", "lloro"
     ])
 
+    # Detectar saludos puros y preguntas sobre identidad
+    texto_lower = texto.lower().strip().rstrip("!?.,")
+    SALUDOS = {
+        "hola", "buenos días", "buenas tardes", "buenas noches", "buenas",
+        "hey", "hi", "hello", "holi", "qué tal", "que tal", "cómo estás",
+        "como estás", "como estas", "ey", "buenas noches", "buenas dias"
+    }
+    PREGUNTAS_IDENTIDAD = {
+        "quién eres", "quien eres", "qué eres", "que eres", "para qué sirves",
+        "para que sirves", "cómo funcionas", "como funcionas", "eres una ia",
+        "eres un bot", "eres humano", "quién hay", "quien hay", "hay alguien"
+    }
+
+    es_saludo = texto_lower in SALUDOS or (
+        len(tokens) <= 3 and any(s in texto_lower for s in ["hola", "hey", "buenas", "hi"])
+    )
+    es_pregunta_identidad = any(p in texto_lower for p in PREGUNTAS_IDENTIDAD)
+
     es_silencio = (
         (len(tokens) < 4 or texto.lower() in tokens_silencio or len(texto) < 10)
         and not tiene_contenido_emocional
+        and not es_saludo
+        and not es_pregunta_identidad
     )
-    state["protocolo"] = "silencio" if es_silencio else "normal"
+
+    if es_saludo:
+        state["protocolo"] = "saludo"
+    elif es_pregunta_identidad:
+        state["protocolo"] = "identidad"
+    elif es_silencio:
+        state["protocolo"] = "silencio"
+    else:
+        state["protocolo"] = "normal"
     return state
 
 
@@ -561,7 +589,27 @@ async def nodo_historial(state: OntomindState) -> OntomindState:
 # ─── NODO 8: Maestro — Síntesis Final ────────────────────
 async def nodo_maestro(state: OntomindState) -> OntomindState:
     """Sintetiza el dictamen en respuesta conversacional."""
+    import random
     protocolo = state["protocolo"]
+    turno     = state.get("turno_actual", 1)
+
+    # Protocolo SALUDO — apertura o reencuentro
+    if protocolo in ("saludo", "identidad"):
+        from prompts import (APERTURAS_PRIMER_CONTACTO, REENCUENTROS,
+                             RESPUESTAS_QUE_ERES)
+        # Detectar si es usuario que vuelve
+        historial = state.get("historial", {})
+        sesiones_previas = historial.get("turnos_desde_ancora", 999)
+        ultima_posicion  = historial.get("ultima_posicion", "desconocido")
+        es_usuario_conocido = ultima_posicion not in ("desconocido", None, "")
+
+        if protocolo == "identidad":
+            state["respuesta"] = random.choice(RESPUESTAS_QUE_ERES)
+        elif es_usuario_conocido:
+            state["respuesta"] = random.choice(REENCUENTROS)
+        else:
+            state["respuesta"] = random.choice(APERTURAS_PRIMER_CONTACTO)
+        return state
 
     # Protocolo VIGIL — usar el prompt especializado de anclaje
     if protocolo == "vigil":
