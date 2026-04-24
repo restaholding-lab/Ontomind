@@ -230,19 +230,34 @@ async def nodo_clasificar_input(state: OntomindState) -> OntomindState:
         "hey", "hi", "hello", "holi", "qué tal", "que tal", "cómo estás",
         "como estás", "como estas", "ey", "buenas noches", "buenas dias"
     }
-    # Señales de identidad — palabras clave que indican el usuario no sabe qué es esto
+    # Señales de identidad — el usuario no sabe qué es esto o busca orientación
     PALABRAS_IDENTIDAD = [
+        # Preguntas sobre identidad
         "quien eres", "quién eres", "que eres", "qué eres",
-        "para que", "para qué", "cómo funciona", "como funciona",
         "eres una ia", "eres un bot", "eres humano", "eres una inteligencia",
-        "quien hay", "quién hay", "hay alguien", "este chat", "esta app",
-        "no sé por donde empezar", "no se por donde empezar",
+        "eres una especie", "eres como", "eres un",
+        # Preguntas sobre función
+        "para que", "para qué", "para que sirve", "para qué sirve",
+        "que puedo encontrar", "qué puedo encontrar",
+        "que puedo hacer", "qué puedo hacer",
+        "que se hace", "qué se hace",
+        "que ofreces", "qué ofreces", "que puedes ofrecerme", "qué puedes ofrecerme",
+        "cómo funciona", "como funciona", "cómo se usa", "como se usa",
+        # No saber por dónde empezar
+        "no sé por donde", "no se por donde",
         "no sé cómo empezar", "no se como empezar",
         "no sé qué hacer", "no se que hacer",
-        "no entiendo", "explícame", "explicame", "qué es esto", "que es esto",
-        "para qué sirve", "para que sirve", "cómo se usa", "como se usa",
+        "no sé muy bien", "no se muy bien",
+        "por donde empiezo", "por dónde empiezo",
         "iniciarme", "iniciame", "empieza tú", "empieza tu",
-        "por donde empiezo", "cómo funciona esto", "como funciona esto"
+        # Confusión directa
+        "no entiendo", "no acabo de entender", "no lo entiendo",
+        "explícame", "explicame", "qué es esto", "que es esto",
+        "este chat", "esta app", "este lugar", "en este sitio",
+        # Preguntas sobre valor
+        "de que me valdra", "de qué me valdrá", "para qué me sirve",
+        "para que me sirve", "que gano", "qué gano",
+        "que obtendre", "qué obtendré", "que obtengo", "qué obtengo",
     ]
 
     # Saludo puro — texto muy corto con palabras de saludo
@@ -256,7 +271,8 @@ async def nodo_clasificar_input(state: OntomindState) -> OntomindState:
     # Si el primer turno tiene saludo + pregunta de identidad → identidad tiene prioridad
     # Mantener protocolo apertura durante los primeros 3 turnos si hay confusión
     turno_actual    = state.get("turno_actual", 1)
-    es_primer_turno = turno_actual <= 3
+    # Mantener apertura hasta 5 turnos si el usuario sigue confundido
+    es_primer_turno = turno_actual <= 5
 
     es_silencio = (
         (len(tokens) < 4 or texto.lower() in tokens_silencio or len(texto) < 10)
