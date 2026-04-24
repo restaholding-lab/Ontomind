@@ -254,7 +254,9 @@ async def nodo_clasificar_input(state: OntomindState) -> OntomindState:
     es_pregunta_identidad = any(p in texto_lower for p in PALABRAS_IDENTIDAD)
 
     # Si el primer turno tiene saludo + pregunta de identidad → identidad tiene prioridad
-    es_primer_turno = state.get("turno_actual", 1) <= 1
+    # Mantener protocolo apertura durante los primeros 3 turnos si hay confusión
+    turno_actual    = state.get("turno_actual", 1)
+    es_primer_turno = turno_actual <= 3
 
     es_silencio = (
         (len(tokens) < 4 or texto.lower() in tokens_silencio or len(texto) < 10)
@@ -609,21 +611,28 @@ async def nodo_maestro(state: OntomindState) -> OntomindState:
     protocolo = state["protocolo"]
     turno     = state.get("turno_actual", 1)
 
-    # Protocolo SALUDO — apertura o reencuentro
+    # Protocolo SALUDO/IDENTIDAD — apertura conversacional con LLM
     if protocolo in ("saludo", "identidad"):
-        from prompts import (APERTURAS_PRIMER_CONTACTO, REENCUENTROS,
-                             RESPUESTAS_QUE_ERES)
-        # Detectar si es usuario que vuelve
-        historial = state.get("historial", {})
-        sesiones_previas = historial.get("turnos_desde_ancora", 999)
+        from prompts import (PROMPT_APERTURA, APERTURAS_PRIMER_CONTACTO,
+                             REENCUENTROS)
+        historial        = state.get("historial", {})
         ultima_posicion  = historial.get("ultima_posicion", "desconocido")
         es_usuario_conocido = ultima_posicion not in ("desconocido", None, "")
 
+        user_input = state.get("user_input", "")
+
         if protocolo == "identidad":
-            state["respuesta"] = random.choice(RESPUESTAS_QUE_ERES)
+            # LLM responde naturalmente a la pregunta real del usuario
+            state["respuesta"] = await llamar_llm(
+                PROMPT_APERTURA,
+                f"El usuario dice: {user_input}",
+                temperatura=0.7
+            )
         elif es_usuario_conocido:
+            # Usuario que vuelve — reencuentro cálido
             state["respuesta"] = random.choice(REENCUENTROS)
         else:
+            # Saludo puro de usuario nuevo
             state["respuesta"] = random.choice(APERTURAS_PRIMER_CONTACTO)
         return state
 
