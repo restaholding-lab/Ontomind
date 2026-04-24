@@ -230,16 +230,31 @@ async def nodo_clasificar_input(state: OntomindState) -> OntomindState:
         "hey", "hi", "hello", "holi", "qué tal", "que tal", "cómo estás",
         "como estás", "como estas", "ey", "buenas noches", "buenas dias"
     }
-    PREGUNTAS_IDENTIDAD = {
-        "quién eres", "quien eres", "qué eres", "que eres", "para qué sirves",
-        "para que sirves", "cómo funcionas", "como funcionas", "eres una ia",
-        "eres un bot", "eres humano", "quién hay", "quien hay", "hay alguien"
-    }
+    # Señales de identidad — palabras clave que indican el usuario no sabe qué es esto
+    PALABRAS_IDENTIDAD = [
+        "quien eres", "quién eres", "que eres", "qué eres",
+        "para que", "para qué", "cómo funciona", "como funciona",
+        "eres una ia", "eres un bot", "eres humano", "eres una inteligencia",
+        "quien hay", "quién hay", "hay alguien", "este chat", "esta app",
+        "no sé por donde empezar", "no se por donde empezar",
+        "no sé cómo empezar", "no se como empezar",
+        "no sé qué hacer", "no se que hacer",
+        "no entiendo", "explícame", "explicame", "qué es esto", "que es esto",
+        "para qué sirve", "para que sirve", "cómo se usa", "como se usa",
+        "iniciarme", "iniciame", "empieza tú", "empieza tu",
+        "por donde empiezo", "cómo funciona esto", "como funciona esto"
+    ]
 
+    # Saludo puro — texto muy corto con palabras de saludo
     es_saludo = texto_lower in SALUDOS or (
-        len(tokens) <= 3 and any(s in texto_lower for s in ["hola", "hey", "buenas", "hi"])
+        len(tokens) <= 4 and any(s in texto_lower for s in ["hola", "hey", "buenas", "hi", "buenas tardes", "buenos días"])
     )
-    es_pregunta_identidad = any(p in texto_lower for p in PREGUNTAS_IDENTIDAD)
+
+    # Pregunta de identidad — contiene alguna señal aunque sea frase larga
+    es_pregunta_identidad = any(p in texto_lower for p in PALABRAS_IDENTIDAD)
+
+    # Si el primer turno tiene saludo + pregunta de identidad → identidad tiene prioridad
+    es_primer_turno = state.get("turno_actual", 1) <= 1
 
     es_silencio = (
         (len(tokens) < 4 or texto.lower() in tokens_silencio or len(texto) < 10)
@@ -248,10 +263,11 @@ async def nodo_clasificar_input(state: OntomindState) -> OntomindState:
         and not es_pregunta_identidad
     )
 
-    if es_saludo:
+    if es_pregunta_identidad or (es_primer_turno and es_saludo):
+        # Primer turno con saludo o pregunta sobre el sistema → apertura
+        state["protocolo"] = "identidad" if es_pregunta_identidad else "saludo"
+    elif es_saludo:
         state["protocolo"] = "saludo"
-    elif es_pregunta_identidad:
-        state["protocolo"] = "identidad"
     elif es_silencio:
         state["protocolo"] = "silencio"
     else:

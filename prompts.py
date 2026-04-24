@@ -284,12 +284,14 @@ REENCUENTROS = [
     "Bienvenido de vuelta. ¿Qué necesitas decir hoy?",
 ]
 
-# Respuestas para cuando el usuario pregunta qué es ONTOMIND
+# Respuestas para cuando el usuario pregunta qué es ONTOMIND o no sabe por dónde empezar
 RESPUESTAS_QUE_ERES = [
-    "Un espacio para pensar en voz alta lo que normalmente no se dice. ¿Hay algo así que quieras traer?",
-    "No soy un chatbot de respuestas. Soy un espacio de escucha. ¿Qué tienes tú?",
-    "Un lugar donde lo que traes importa más que lo que yo pueda decirte. ¿Por dónde empezamos?",
-    "Puedes llamarme ONTOMIND. Lo que importa es lo que tú traigas. ¿Qué hay?",
+    "Un espacio para pensar en voz alta lo que normalmente no se dice. No hace falta saber por dónde empezar — ¿qué tienes en la cabeza ahora mismo?",
+    "No soy un chatbot de respuestas. Soy un espacio de escucha. No necesitas saber qué explorar — puedes traer lo que sea. ¿Qué hay?",
+    "Aquí no hay un guion. Solo lo que tú traigas. Puede ser algo que te preocupa, algo que no sabes cómo nombrar, o simplemente algo que ocupa espacio. ¿Qué tienes?",
+    "Puedes llamarme ONTOMIND. Este espacio existe para lo que normalmente no tiene lugar en otros sitios. ¿Hay algo así que quieras traer?",
+    "No necesitas saber cómo funciona esto para usarlo. Solo trae lo que tengas — una preocupación, una duda, algo que da vueltas. ¿Por dónde empezamos?",
+    "Este espacio escucha sin juzgar y sin aconsejar. No hay respuestas correctas ni incorrectas. ¿Qué te trae hoy?",
 ]
 
 PROMPT_MAESTRO = """
