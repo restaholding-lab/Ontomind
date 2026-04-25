@@ -17,10 +17,15 @@ from prompts import (PROMPT_E_ACTOS, PROMPT_E_JUICIOS, PROMPT_P_QUIEBRE,
 from rag import recuperar_contexto, formatear_contexto
 from memory import mapa_observador, sesion_redis
 
-OPENAI_API_KEY = "".join(os.getenv("OPENAI_API_KEY", "").split())
-QDRANT_URL     = os.getenv("QDRANT_URL", "").strip()
-QDRANT_API_KEY = os.getenv("QDRANT_API_KEY", "").strip()
-OPENAI_MODEL   = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+OPENAI_API_KEY    = "".join(os.getenv("OPENAI_API_KEY", "").split())
+QDRANT_URL        = os.getenv("QDRANT_URL", "").strip()
+QDRANT_API_KEY    = os.getenv("QDRANT_API_KEY", "").strip()
+OPENAI_MODEL      = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+
+# RunPod Serverless — modelo fine-tuneado ONTOMIND
+RUNPOD_API_KEY    = os.getenv("RUNPOD_API_KEY", "").strip()
+RUNPOD_ENDPOINT   = os.getenv("RUNPOD_ENDPOINT", "").strip()  # swon926uwdgq31
+USAR_RUNPOD       = bool(RUNPOD_API_KEY and RUNPOD_ENDPOINT)
 
 RESPUESTA_ANCORA = """Lo que describes me importa, y quiero estar presente en esto contigo.
 
@@ -62,23 +67,61 @@ class OntomindState(TypedDict):
 
 
 # ─── Llamada LLM genérica ────────────────────────────────
+async def llamar_llm_runpod(system: str, user: str,
+                            temperatura: float = 0.75,
+                            max_tokens: int = 280) -> str:
+    """Llamada al modelo fine-tuneado ONTOMIND via RunPod Serverless."""
+    async with httpx.AsyncClient(timeout=120) as client:
+        r = await client.post(
+            f"https://api.runpod.ai/v2/{RUNPOD_ENDPOINT}/runsync",
+            headers={
+                "Authorization": f"Bearer {RUNPOD_API_KEY}",
+                "Content-Type":  "application/json"
+            },
+            json={
+                "input": {
+                    "model":       "ontomind",
+                    "messages":    [
+                        {"role": "system", "content": system},
+                        {"role": "user",   "content": user}
+                    ],
+                    "temperature": temperatura,
+                    "max_tokens":  max_tokens,
+                    "stream":      False
+                }
+            }
+        )
+        r.raise_for_status()
+        data = r.json()
+        # RunPod runsync devuelve output directo
+        output = data.get("output", {})
+        if isinstance(output, dict):
+            return output.get("message", output.get("response", "")).strip()
+        return str(output).strip()
+
+
 async def llamar_llm(system: str, user: str,
                      temperatura: float = 0.3,
                      es_maestro: bool = False) -> str:
     """
-    Llamada al LLM. El nodo Maestro usa parámetros optimizados
-    para naturalidad conversacional (temperatura alta, penalizaciones
-    de frecuencia y presencia, max_tokens limitado).
-    El resto de nodos usan parámetros conservadores para JSON limpio.
+    Llamada al LLM. Usa RunPod (modelo fine-tuneado) si está configurado,
+    GPT-4o-mini como fallback.
     """
+    # RunPod Serverless — modelo ONTOMIND fine-tuneado
+    if USAR_RUNPOD:
+        t = 0.75 if es_maestro else temperatura
+        mx = 280 if es_maestro else 800
+        return await llamar_llm_runpod(system, user, temperatura=t, max_tokens=mx)
+
+    # Fallback: GPT-4o-mini
     if es_maestro:
         params = {
             "model":             OPENAI_MODEL,
-            "temperature":       0.75,   # más variación natural
-            "top_p":             0.9,    # nucleus sampling
-            "frequency_penalty": 0.25,   # evita muletillas repetidas
-            "presence_penalty":  0.3,    # incentiva temas nuevos
-            "max_tokens":        280,    # respuestas concisas
+            "temperature":       0.75,
+            "top_p":             0.9,
+            "frequency_penalty": 0.25,
+            "presence_penalty":  0.3,
+            "max_tokens":        280,
         }
     else:
         params = {
