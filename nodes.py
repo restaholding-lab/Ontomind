@@ -70,8 +70,13 @@ class OntomindState(TypedDict):
 async def llamar_llm_runpod(system: str, user: str,
                             temperatura: float = 0.75,
                             max_tokens: int = 280) -> str:
-    """Llamada al modelo fine-tuneado ONTOMIND via RunPod Serverless."""
-    async with httpx.AsyncClient(timeout=120) as client:
+    """Llamada al modelo fine-tuneado ONTOMIND via RunPod Serverless (worker Ollama SvenBrnn)."""
+    # Formato del worker SvenBrnn/runpod-worker-ollama
+    # https://github.com/SvenBrnn/runpod-worker-ollama
+    modelo = os.getenv("OLLAMA_MODEL_NAME",
+        "hf.co/Buyy/ontomind-qwen-14b/ontomind-qwen-14b-q4.gguf")
+
+    async with httpx.AsyncClient(timeout=180) as client:
         r = await client.post(
             f"https://api.runpod.ai/v2/{RUNPOD_ENDPOINT}/runsync",
             headers={
@@ -80,24 +85,34 @@ async def llamar_llm_runpod(system: str, user: str,
             },
             json={
                 "input": {
-                    "model":       "ontomind",
-                    "messages":    [
+                    "model": modelo,
+                    "messages": [
                         {"role": "system", "content": system},
                         {"role": "user",   "content": user}
                     ],
-                    "temperature": temperatura,
-                    "max_tokens":  max_tokens,
-                    "stream":      False
+                    "options": {
+                        "temperature": temperatura,
+                        "num_predict": max_tokens,
+                    },
+                    "stream": False
                 }
             }
         )
         r.raise_for_status()
         data = r.json()
-        # RunPod runsync devuelve output directo
+
+        # El worker devuelve output con la respuesta de Ollama
         output = data.get("output", {})
         if isinstance(output, dict):
-            return output.get("message", output.get("response", "")).strip()
-        return str(output).strip()
+            # Formato Ollama: {"message": {"role": "assistant", "content": "..."}}
+            msg = output.get("message", {})
+            if isinstance(msg, dict):
+                return msg.get("content", "").strip()
+            # Formato alternativo
+            return output.get("response", output.get("content", "")).strip()
+        if isinstance(output, str):
+            return output.strip()
+        return ""
 
 
 async def llamar_llm(system: str, user: str,
