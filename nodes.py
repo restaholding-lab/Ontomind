@@ -26,6 +26,7 @@ OPENAI_MODEL      = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 RUNPOD_API_KEY    = os.getenv("RUNPOD_API_KEY", "").strip()
 RUNPOD_ENDPOINT   = os.getenv("RUNPOD_ENDPOINT", "").strip()  # swon926uwdgq31
 USAR_RUNPOD       = bool(RUNPOD_API_KEY and RUNPOD_ENDPOINT)
+print(f"[RUNPOD] API_KEY={bool(RUNPOD_API_KEY)} ENDPOINT={RUNPOD_ENDPOINT} USAR={USAR_RUNPOD}")
 
 RESPUESTA_ANCORA = """Lo que describes me importa, y quiero estar presente en esto contigo.
 
