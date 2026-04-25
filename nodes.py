@@ -621,6 +621,41 @@ async def nodo_historial(state: OntomindState) -> OntomindState:
 
 
 # ─── NODO 8: Maestro — Síntesis Final ────────────────────
+
+async def detectar_fase_conversacion(state: OntomindState) -> str:
+    """
+    Determina en qué fase está la conversación.
+    Devuelve: 'encuentro' | 'escucha' | 'intervencion'
+    """
+    from prompts import PROMPT_DETECTOR_FASE
+
+    turno    = state.get("turno_actual", 1)
+    mensajes = state.get("mensajes_historial", [])
+
+    # Turnos 1-2: siempre encuentro
+    if turno <= 2:
+        return "encuentro"
+
+    # Construir resumen del intercambio para el detector
+    historial_texto = ""
+    for m in mensajes[-6:]:  # Últimos 3 intercambios
+        rol = "Usuario" if m.get("rol") == "user" else "Coach"
+        historial_texto += rol + ": " + m.get('contenido','') + "\n"
+
+    if not historial_texto.strip():
+        return "encuentro"
+
+    try:
+        raw = await llamar_llm(PROMPT_DETECTOR_FASE, historial_texto, temperatura=0.2)
+        resultado = await parsear_json(raw)
+        fase = resultado.get("fase", "encuentro")
+        razon = resultado.get("razon", "")
+        print(f"[FASE] {fase} — {razon}")
+        return fase if fase in ("encuentro", "escucha", "intervencion") else "encuentro"
+    except Exception as e:
+        print(f"[FASE] Error: {e} → encuentro por defecto")
+        return "encuentro"
+
 async def nodo_maestro(state: OntomindState) -> OntomindState:
     """Sintetiza el dictamen en respuesta conversacional."""
     import random
@@ -651,6 +686,32 @@ async def nodo_maestro(state: OntomindState) -> OntomindState:
             # Saludo puro de usuario nuevo
             state["respuesta"] = random.choice(APERTURAS_PRIMER_CONTACTO)
         return state
+
+    # ── Detección de fase conversacional ──────────────────
+    # Solo si no es un protocolo especial
+    if protocolo not in ("vigil", "saludo", "identidad"):
+        fase = await detectar_fase_conversacion(state)
+
+        if fase == "encuentro":
+            from prompts import PROMPT_ENCUENTRO
+            user_input = state.get("user_input", "")
+            mensajes   = state.get("mensajes_historial", [])
+            contexto   = f"Input actual: {user_input}"
+            if mensajes:
+                ultimo = mensajes[-2] if len(mensajes) >= 2 else mensajes[-1]
+                contexto = f"Último intercambio: {ultimo.get('contenido','')}\nInput actual: {user_input}"
+            state["respuesta"] = await llamar_llm(
+                PROMPT_ENCUENTRO, contexto, temperatura=0.8
+            )
+            return state
+
+        # fase == "escucha" → el Maestro usa el input con más escucha activa
+        if fase == "escucha":
+            # Añadir instrucción al dictamen para que el Maestro priorice escucha
+            dictamen = state.get("dictamen", {})
+            dictamen["modo_escucha_activa"] = True
+            state["dictamen"] = dictamen
+        # fase == "intervencion" → flujo normal del Maestro (zarpazo, espejo, siembra)
 
     # Protocolo VIGIL — usar el prompt especializado de anclaje
     if protocolo == "vigil":
