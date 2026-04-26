@@ -77,7 +77,7 @@ async def llamar_llm_runpod(system: str, user: str,
     modelo = os.getenv("OLLAMA_MODEL_NAME",
         "hf.co/Buyy/ontomind-qwen-14b/ontomind-qwen-14b-q4.gguf")
 
-    async with httpx.AsyncClient(timeout=180) as client:
+    async with httpx.AsyncClient(timeout=300) as client:
         r = await client.post(
             f"https://api.runpod.ai/v2/{RUNPOD_ENDPOINT}/runsync",
             headers={
