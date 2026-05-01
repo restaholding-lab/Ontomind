@@ -71,51 +71,76 @@ class OntomindState(TypedDict):
 async def llamar_llm_runpod(system: str, user: str,
                             temperatura: float = 0.75,
                             max_tokens: int = 280) -> str:
-    """Llamada al modelo fine-tuneado ONTOMIND via RunPod Serverless (worker Ollama SvenBrnn)."""
-    # Formato del worker SvenBrnn/runpod-worker-ollama
-    # https://github.com/SvenBrnn/runpod-worker-ollama
+    """Llamada al modelo fine-tuneado ONTOMIND via RunPod Serverless con polling."""
+    import asyncio
     modelo = os.getenv("OLLAMA_MODEL_NAME",
         "hf.co/Buyy/ontomind-qwen-14b/ontomind-qwen-14b-q4.gguf")
 
+    headers = {
+        "Authorization": f"Bearer {RUNPOD_API_KEY}",
+        "Content-Type":  "application/json"
+    }
+    payload = {
+        "input": {
+            "model": modelo,
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user",   "content": user}
+            ],
+            "options": {
+                "temperature": temperatura,
+                "num_predict": max_tokens,
+            },
+            "stream": False
+        }
+    }
+
     async with httpx.AsyncClient(timeout=300) as client:
+        # Paso 1: enviar job con /run
         r = await client.post(
             f"https://api.runpod.ai/v2/{RUNPOD_ENDPOINT}/run",
-            headers={
-                "Authorization": f"Bearer {RUNPOD_API_KEY}",
-                "Content-Type":  "application/json"
-            },
-            json={
-                "input": {
-                    "model": modelo,
-                    "messages": [
-                        {"role": "system", "content": system},
-                        {"role": "user",   "content": user}
-                    ],
-                    "options": {
-                        "temperature": temperatura,
-                        "num_predict": max_tokens,
-                    },
-                    "stream": False
-                }
-            }
+            headers=headers,
+            json=payload
         )
         r.raise_for_status()
-        data = r.json()
+        job_data = r.json()
+        job_id = job_data.get("id")
+        print(f"[RUNPOD] Job enviado: {job_id} | status: {job_data.get('status')}")
 
-        # El worker devuelve output con la respuesta de Ollama
-        output = data.get("output", {})
-        if isinstance(output, dict):
-            # Formato Ollama: {"message": {"role": "assistant", "content": "..."}}
-            msg = output.get("message", {})
-            if isinstance(msg, dict):
-                return msg.get("content", "").strip()
-            # Formato alternativo
-            return output.get("response", output.get("content", "")).strip()
-        if isinstance(output, str):
-            return output.strip()
-        print(f"[RUNPOD] Output inesperado: {type(output)} — {str(output)[:100]}")
+        if not job_id:
+            print(f"[RUNPOD] Sin job_id: {job_data}")
+            return ""
+
+        # Paso 2: polling hasta completar
+        for intento in range(60):  # máximo 5 minutos (60 * 5s)
+            await asyncio.sleep(5)
+            sr = await client.get(
+                f"https://api.runpod.ai/v2/{RUNPOD_ENDPOINT}/status/{job_id}",
+                headers=headers
+            )
+            sr.raise_for_status()
+            status_data = sr.json()
+            status = status_data.get("status", "")
+            print(f"[RUNPOD] Polling {intento+1}: {status}")
+
+            if status == "COMPLETED":
+                output = status_data.get("output", {})
+                print(f"[RUNPOD] Output completo: {str(output)[:200]}")
+                if isinstance(output, dict):
+                    msg = output.get("message", {})
+                    if isinstance(msg, dict):
+                        return msg.get("content", "").strip()
+                    return output.get("response", output.get("content", "")).strip()
+                if isinstance(output, str):
+                    return output.strip()
+                return ""
+
+            elif status in ("FAILED", "CANCELLED", "TIMED_OUT"):
+                print(f"[RUNPOD] Job fallido: {status} | {status_data.get('error','')}")
+                return ""
+
+        print("[RUNPOD] Timeout de polling — 5 minutos sin respuesta")
         return ""
-
 
 async def llamar_llm(system: str, user: str,
                      temperatura: float = 0.3,
