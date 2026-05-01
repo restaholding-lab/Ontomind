@@ -79,7 +79,7 @@ async def llamar_llm_runpod(system: str, user: str,
 
     async with httpx.AsyncClient(timeout=300) as client:
         r = await client.post(
-            f"https://api.runpod.ai/v2/{RUNPOD_ENDPOINT}/runsync",
+            f"https://api.runpod.ai/v2/{RUNPOD_ENDPOINT}/run",
             headers={
                 "Authorization": f"Bearer {RUNPOD_API_KEY}",
                 "Content-Type":  "application/json"
