@@ -113,6 +113,7 @@ async def llamar_llm_runpod(system: str, user: str,
             return output.get("response", output.get("content", "")).strip()
         if isinstance(output, str):
             return output.strip()
+        print(f"[RUNPOD] Output inesperado: {type(output)} — {str(output)[:100]}")
         return ""
 
 
@@ -1107,9 +1108,14 @@ async def nodo_actualizar_memoria(state: OntomindState) -> OntomindState:
         )
     }
     await mapa_observador.actualizar(state["session_id"], datos)
-    await sesion_redis.agregar_mensaje(
-        state["session_id"], "assistant", state["respuesta"]
-    )
+    # Solo guardar si hay respuesta real — evita turnos vacíos en el historial
+    respuesta_final = state.get("respuesta", "").strip()
+    if respuesta_final:
+        await sesion_redis.agregar_mensaje(
+            state["session_id"], "assistant", respuesta_final
+        )
+    else:
+        print(f"[GUARDAR] Respuesta vacía en turno {state.get('turno_actual')} — no se guarda en historial")
     # Log completo de nodos para el dashboard de supervisores
     await mapa_observador.registrar_log_nodos(
         state["session_id"],
