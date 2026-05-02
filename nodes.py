@@ -112,8 +112,8 @@ async def llamar_llm_runpod(system: str, user: str,
             return ""
 
         # Paso 2: polling hasta completar
-        for intento in range(60):  # máximo 5 minutos (60 * 5s)
-            await asyncio.sleep(5)
+        for intento in range(150):  # máximo 5 minutos (150 * 2s)
+            await asyncio.sleep(2)
             sr = await client.get(
                 f"https://api.runpod.ai/v2/{RUNPOD_ENDPOINT}/status/{job_id}",
                 headers=headers

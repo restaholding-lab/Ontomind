@@ -1,9 +1,12 @@
 """
 main.py — API FastAPI de ONTOMIND
 Endpoints para el chat y gestión de sesiones.
+Flujo asíncrono: /chat devuelve job_id, /chat/status/{job_id} devuelve resultado.
 """
 import os
 import uuid
+import time
+import asyncio
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -17,7 +20,7 @@ from memory import sesion_redis, mapa_observador
 app = FastAPI(
     title       = "ONTOMIND API",
     description = "Motor conversacional ontológico — Echeverría + Pinotti",
-    version     = "1.0.0"
+    version     = "1.1.0"
 )
 
 app.add_middleware(
@@ -29,27 +32,107 @@ app.add_middleware(
 )
 
 
+# ─── Job Storage (en memoria) ────────────────────────────
+_jobs = {}
+_job_timestamps = {}
+JOB_TTL = 600  # 10 minutos
+
+def _cleanup_old_jobs():
+    """Elimina jobs con más de 10 minutos."""
+    now = time.time()
+    expired = [k for k, t in _job_timestamps.items() if now - t > JOB_TTL]
+    for k in expired:
+        _jobs.pop(k, None)
+        _job_timestamps.pop(k, None)
+
+
 # ─── Modelos ──────────────────────────────────────────────
 class MensajeRequest(BaseModel):
     session_id: str
     mensaje:    str
     user_code:  str = "anonimo"
 
-class MensajeResponse(BaseModel):
-    session_id:  str
-    respuesta:   str
-    protocolo:   str
-    turno:       int
-
 class SesionResponse(BaseModel):
     session_id: str
+
+
+# ─── Procesamiento en background ─────────────────────────
+async def _procesar_chat(job_id: str, session_id: str,
+                         mensaje: str, user_code: str):
+    """Ejecuta el grafo completo en background y guarda el resultado."""
+    try:
+        # Guardar mensaje del usuario en Redis
+        await sesion_redis.agregar_mensaje(session_id, "user", mensaje)
+        turno = await sesion_redis.incrementar_turno(session_id)
+
+        # Recuperar estado de sesión
+        sesion = await sesion_redis.get(session_id)
+
+        # Estado inicial del grafo
+        estado_inicial = {
+            "session_id":             session_id,
+            "user_input":             mensaje,
+            "turno_actual":           turno,
+            "protocolo":              "normal",
+            "reporte_actos":          {},
+            "reporte_juicios":        {},
+            "reporte_quiebre":        {},
+            "reporte_victima":        {},
+            "dictamen":               {},
+            "historial":              {},
+            "delta_observador":       "estable",
+            "confianza_victima_acum": sesion.get("confianza_victima_acum", 0),
+            "pregunta_dominio_hecha": sesion.get("pregunta_dominio_hecha", False),
+            "nivel_riesgo":           "ninguno",
+            "umbral_vigil":           0.70,
+            "en_resguardo":           False,
+            "ancora_previo":          False,
+            "respuesta":              "",
+            "evaluacion":             {},
+            "evaluacion_conversacion": {},
+            "turnos_sin_declaracion":  sesion.get("turnos_sin_declaracion", 0),
+            "user_code":              user_code
+        }
+
+        # Ejecutar el grafo
+        resultado = await ontomind_graph.ainvoke(estado_inicial)
+
+        # Actualizar estado de sesión para el siguiente turno
+        sesion["confianza_victima_acum"] = resultado.get("confianza_victima_acum", 0)
+        sesion["pregunta_dominio_hecha"] = resultado.get("pregunta_dominio_hecha", False)
+        eval_conv = resultado.get("evaluacion_conversacion", {})
+        if eval_conv.get("declaracion_detectada"):
+            sesion["turnos_sin_declaracion"] = 0
+        else:
+            sesion["turnos_sin_declaracion"] = sesion.get("turnos_sin_declaracion", 0) + 1
+        sesion["protocolo"] = resultado.get("protocolo", "normal")
+        await sesion_redis.set(session_id, sesion)
+
+        # Guardar resultado
+        _jobs[job_id] = {
+            "status": "COMPLETED",
+            "result": {
+                "session_id": session_id,
+                "respuesta":  resultado.get("respuesta", ""),
+                "protocolo":  resultado.get("protocolo", "normal"),
+                "turno":      turno
+            }
+        }
+        print(f"[JOB] {job_id} completado — turno {turno}")
+
+    except Exception as e:
+        print(f"[JOB] {job_id} error: {e}")
+        _jobs[job_id] = {
+            "status": "FAILED",
+            "error": str(e)[:200]
+        }
 
 
 # ─── Endpoints ────────────────────────────────────────────
 
 @app.get("/")
 async def root():
-    return {"status": "ok", "servicio": "ONTOMIND API v1.0"}
+    return {"status": "ok", "servicio": "ONTOMIND API v1.1"}
 
 
 @app.post("/admin/dpo/guardar")
@@ -58,14 +141,14 @@ async def guardar_par_dpo(request: Request):
     try:
         data = await request.json()
         import httpx as _httpx
-        url  = SUPABASE_URL.strip()
-        key  = SUPABASE_KEY.strip()
+        SUPABASE_URL = os.getenv("SUPABASE_URL", "").strip()
+        SUPABASE_KEY = os.getenv("SUPABASE_KEY", "").strip()
         async with _httpx.AsyncClient(timeout=15) as client:
             r = await client.post(
-                f"{url}/rest/v1/pares_dpo",
+                f"{SUPABASE_URL}/rest/v1/pares_dpo",
                 headers={
-                    "apikey": key,
-                    "Authorization": "Bearer " + key,
+                    "apikey": SUPABASE_KEY,
+                    "Authorization": "Bearer " + SUPABASE_KEY,
                     "Content-Type": "application/json",
                     "Prefer": "return=representation"
                 },
@@ -104,78 +187,37 @@ async def nueva_sesion():
     return {"session_id": session_id}
 
 
-@app.post("/chat", response_model=MensajeResponse)
+@app.post("/chat")
 async def chat(request: MensajeRequest):
     """
-    Endpoint principal del chat ontológico.
-    Procesa el mensaje del usuario a través del grafo LangGraph.
+    Endpoint principal del chat ontológico — ASÍNCRONO.
+    Devuelve un job_id inmediatamente. El cliente hace polling en /chat/status/{job_id}.
     """
     if not request.mensaje.strip():
         raise HTTPException(status_code=400, detail="Mensaje vacío")
 
-    # Guardar mensaje del usuario en Redis
-    await sesion_redis.agregar_mensaje(
-        request.session_id, "user", request.mensaje
+    _cleanup_old_jobs()
+
+    job_id = str(uuid.uuid4())
+    _jobs[job_id] = {"status": "IN_PROGRESS"}
+    _job_timestamps[job_id] = time.time()
+
+    # Lanzar procesamiento en background
+    asyncio.create_task(
+        _procesar_chat(job_id, request.session_id,
+                       request.mensaje, request.user_code)
     )
-    turno = await sesion_redis.incrementar_turno(request.session_id)
 
-    # Recuperar estado de sesión
-    sesion = await sesion_redis.get(request.session_id)
+    return {"job_id": job_id, "status": "IN_PROGRESS"}
 
-    # Estado inicial del grafo
-    estado_inicial = {
-        "session_id":             request.session_id,
-        "user_input":             request.mensaje,
-        "turno_actual":           turno,
-        "protocolo":              "normal",
-        "reporte_actos":          {},
-        "reporte_juicios":        {},
-        "reporte_quiebre":        {},
-        "reporte_victima":        {},
-        "dictamen":               {},
-        "historial":              {},
-        "delta_observador":       "estable",
-        "confianza_victima_acum": sesion.get("confianza_victima_acum", 0),
-        "pregunta_dominio_hecha": sesion.get("pregunta_dominio_hecha", False),
-        "nivel_riesgo":           "ninguno",
-        "umbral_vigil":           0.70,
-        "en_resguardo":           False,
-        "ancora_previo":          False,
-        "respuesta":              "",
-        "evaluacion":             {},
-        "evaluacion_conversacion": {},
-        "turnos_sin_declaracion":  sesion.get("turnos_sin_declaracion", 0),
-        "user_code":              request.user_code
-    }
 
-    # Ejecutar el grafo
-    try:
-        resultado = await ontomind_graph.ainvoke(estado_inicial)
-    except Exception as e:
-        print(f"[GRAPH ERROR] {e}")
-        raise HTTPException(
-            status_code=500,
-            detail="Error procesando el mensaje. Intenta de nuevo."
-        )
-
-    # Actualizar estado de sesión para el siguiente turno
-    sesion["confianza_victima_acum"] = resultado.get("confianza_victima_acum", 0)
-    sesion["pregunta_dominio_hecha"] = resultado.get("pregunta_dominio_hecha", False)
-    # Actualizar contador de turnos sin declaracion
-    eval_conv = resultado.get("evaluacion_conversacion", {})
-    if eval_conv.get("declaracion_detectada"):
-        sesion["turnos_sin_declaracion"] = 0
-    else:
-        sesion["turnos_sin_declaracion"] = sesion.get("turnos_sin_declaracion", 0) + 1
-    sesion["protocolo"]              = resultado.get("protocolo", "normal")
-    await sesion_redis.set(request.session_id, sesion)
-
-    return {
-        "session_id": request.session_id,
-        "respuesta":  resultado.get("respuesta", ""),
-        "protocolo":  resultado.get("protocolo", "normal"),
-        "turno":      turno
-    }
+@app.get("/chat/status/{job_id}")
+async def chat_status(job_id: str):
+    """Consulta el estado de un job de chat."""
+    job = _jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job no encontrado")
+    return job
 
 
 @app.get("/sesion/{session_id}/historial")
@@ -190,7 +232,6 @@ async def get_mapa_observador(session_id: str):
     """Devuelve el Mapa del Observador del usuario."""
     mapa = await mapa_observador.get(session_id)
     return {"session_id": session_id, "mapa": mapa}
-
 
 
 @app.get("/debug/env")
@@ -217,7 +258,6 @@ async def debug_supabase():
         "key_set": key != "NOT_SET",
         "key_length": len(key),
     }
-    # Test actual connection
     if url != "NOT_SET" and key != "NOT_SET":
         try:
             r = await httpx.AsyncClient().get(
