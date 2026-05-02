@@ -126,7 +126,24 @@ async def llamar_llm_runpod(system: str, user: str,
             if status == "COMPLETED":
                 output = status_data.get("output", {})
                 print(f"[RUNPOD] Output completo: {str(output)[:200]}")
+                # Formato lista: [{"choices": [{"message": {"content": "..."}}]}]
+                if isinstance(output, list) and output:
+                    item = output[0]
+                    if isinstance(item, dict):
+                        choices = item.get("choices", [])
+                        if choices and isinstance(choices[0], dict):
+                            msg = choices[0].get("message", {})
+                            if isinstance(msg, dict):
+                                return msg.get("content", "").strip()
+                        # fallback dict plano
+                        return item.get("response", item.get("content", "")).strip()
+                # Formato dict plano
                 if isinstance(output, dict):
+                    choices = output.get("choices", [])
+                    if choices and isinstance(choices[0], dict):
+                        msg = choices[0].get("message", {})
+                        if isinstance(msg, dict):
+                            return msg.get("content", "").strip()
                     msg = output.get("message", {})
                     if isinstance(msg, dict):
                         return msg.get("content", "").strip()
