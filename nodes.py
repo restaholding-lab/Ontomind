@@ -70,11 +70,19 @@ class OntomindState(TypedDict):
 # ─── Llamada LLM genérica ────────────────────────────────
 async def llamar_llm_runpod(system: str, user: str,
                             temperatura: float = 0.75,
-                            max_tokens: int = 280) -> str:
-    """Llamada al modelo fine-tuneado ONTOMIND via RunPod Serverless con polling."""
+                            max_tokens: int = 280,
+                            messages: list = None) -> str:
+    """Llamada al modelo fine-tuneado ONTOMIND via RunPod Serverless con polling.
+    Si se pasa messages, se usan directamente en vez de construir desde system+user."""
     import asyncio
     modelo = os.getenv("OLLAMA_MODEL_NAME",
         "hf.co/Buyy/ontomind-qwen-14b/ontomind-qwen-14b-q4.gguf")
+
+    if messages is None:
+        messages = [
+            {"role": "system", "content": system},
+            {"role": "user",   "content": user}
+        ]
 
     headers = {
         "Authorization": f"Bearer {RUNPOD_API_KEY}",
@@ -83,10 +91,7 @@ async def llamar_llm_runpod(system: str, user: str,
     payload = {
         "input": {
             "model": modelo,
-            "messages": [
-                {"role": "system", "content": system},
-                {"role": "user",   "content": user}
-            ],
+            "messages": messages,
             "options": {
                 "temperature": temperatura,
                 "num_predict": max_tokens,
@@ -161,15 +166,18 @@ async def llamar_llm_runpod(system: str, user: str,
 
 async def llamar_llm(system: str, user: str,
                      temperatura: float = 0.3,
-                     es_maestro: bool = False) -> str:
+                     es_maestro: bool = False,
+                     forzar_openai: bool = False) -> str:
     """
-    Llamada al LLM. Usa RunPod (modelo fine-tuneado) si está configurado,
-    GPT-4o-mini como fallback.
+    Llamada al LLM.
+    - forzar_openai=True → siempre GPT-4o-mini (detectores, encuentro, evaluadores)
+    - forzar_openai=False + USAR_RUNPOD → modelo fine-tuneado vía RunPod
+    - Fallback → GPT-4o-mini
     """
-    # RunPod Serverless — modelo ONTOMIND fine-tuneado
-    if USAR_RUNPOD:
-        t = 0.75 if es_maestro else temperatura
-        mx = 280 if es_maestro else 800
+    # RunPod Serverless — solo si no se fuerza OpenAI
+    if USAR_RUNPOD and not forzar_openai:
+        t = 0.55 if es_maestro else temperatura
+        mx = 350 if es_maestro else 800
         return await llamar_llm_runpod(system, user, temperatura=t, max_tokens=mx)
 
     # Fallback: GPT-4o-mini
@@ -213,17 +221,15 @@ async def llamar_llm_con_shots(system: str, user: str,
                                 few_shots: list = None,
                                 perfil: str = "") -> str:
     """
-    Variante de llamar_llm para el nodo Maestro.
+    Variante de llamar_llm para el nodo Maestro en fase INTERVENCIÓN.
+    Usa RunPod (modelo fine-tuneado) cuando está disponible.
     Inyecta few-shots como mensajes de rol antes del input real.
-    Usa parámetros optimizados para naturalidad conversacional.
 
     Para dolor_agudo aplica assistant prefill ("—") que fuerza
     la apertura con raya tipográfica, eliminando aperturas empáticas
-    genéricas ("Entiendo que...", "Parece que...") heredadas del RLHF.
+    genéricas ("Entiendo que...", "Parece que...").
     """
-    # Mapa de prefill por perfil: token que fuerza el primer token de respuesta
-    # La raya tipográfica (—) fuerza castellano internacional desde el primer token
-    # ya que GPT-4o-mini tiende al voseo cuando genera libremente.
+    # Mapa de prefill por perfil
     PREFILL_POR_PERFIL = {
         "dolor_agudo":   "—",
         "juez_control":  "—",
@@ -235,19 +241,30 @@ async def llamar_llm_con_shots(system: str, user: str,
 
     messages = [{"role": "system", "content": system}]
 
-    # Few-shots eliminados — GPT-4o-mini los confunde con historial real.
-    # El Maestro opera solo con PROMPT_MAESTRO + DOCUMENTO_REFERENCIA + prefill.
-    # Los few-shots se reservan para el fine-tuning de Qwen2.5-14B (fase DPO).
+    # Few-shots: el modelo fine-tuneado sí los aprovecha (fueron parte del DPO)
+    if USAR_RUNPOD and few_shots:
+        for u_shot, a_shot in few_shots:
+            messages.append({"role": "user",      "content": u_shot})
+            messages.append({"role": "assistant", "content": a_shot})
 
     # Input real del usuario
     messages.append({"role": "user", "content": user})
 
-    # PREFILL: si el perfil lo requiere, añadir turno assistant parcial.
-    # El modelo continúa desde ese token en lugar de generar libremente.
+    # PREFILL: turno assistant parcial
     prefill_token = PREFILL_POR_PERFIL.get(perfil, "")
     if prefill_token:
         messages.append({"role": "assistant", "content": prefill_token})
 
+    # ── RunPod: modelo fine-tuneado para intervención ──
+    if USAR_RUNPOD:
+        respuesta_raw = await llamar_llm_runpod(
+            "", "", temperatura=0.55, max_tokens=350, messages=messages
+        )
+        if prefill_token and respuesta_raw and not respuesta_raw.startswith(prefill_token):
+            return prefill_token + respuesta_raw
+        return respuesta_raw if respuesta_raw else ""
+
+    # ── Fallback: GPT-4o-mini ──
     async with httpx.AsyncClient(timeout=60) as client:
         r = await client.post(
             "https://api.openai.com/v1/chat/completions",
@@ -268,8 +285,6 @@ async def llamar_llm_con_shots(system: str, user: str,
         r.raise_for_status()
         respuesta_raw = r.json()["choices"][0]["message"]["content"].strip()
 
-    # OpenAI devuelve solo la continuación tras el prefill.
-    # Reconstruimos la respuesta completa: prefill + continuación.
     if prefill_token:
         return prefill_token + respuesta_raw
     return respuesta_raw
@@ -402,7 +417,7 @@ async def _detector(nodo_id: str, prompt: str,
     fragmentos = await recuperar_contexto(nodo_id, query_rag, top_k=3)
     contexto   = formatear_contexto(fragmentos)
     user_msg   = f"TEXTO DEL USUARIO:\n{user_input}\n\nCONTEXTO DEL CORPUS:\n{contexto}"
-    respuesta  = await llamar_llm(prompt, user_msg)
+    respuesta  = await llamar_llm(prompt, user_msg, forzar_openai=True)
     return await parsear_json(respuesta)
 
 
@@ -697,7 +712,7 @@ async def nodo_distinciones(state: OntomindState) -> OntomindState:
     except Exception as ep:
         print(f"[DISTINCIONES] Patrón conversacional no disponible: {ep}")
 
-    respuesta = await llamar_llm(PROMPT_DISTINCIONES, user_msg, temperatura=0.4)
+    respuesta = await llamar_llm(PROMPT_DISTINCIONES, user_msg, temperatura=0.4, forzar_openai=True)
     state["dictamen"] = await parsear_json(respuesta)
     return state
 
@@ -748,7 +763,7 @@ async def detectar_fase_conversacion(state: OntomindState) -> str:
         return "encuentro"
 
     try:
-        raw = await llamar_llm(PROMPT_DETECTOR_FASE, historial_texto, temperatura=0.2)
+        raw = await llamar_llm(PROMPT_DETECTOR_FASE, historial_texto, temperatura=0.2, forzar_openai=True)
         resultado = await parsear_json(raw)
         fase = resultado.get("fase", "encuentro")
         razon = resultado.get("razon", "")
@@ -779,7 +794,8 @@ async def nodo_maestro(state: OntomindState) -> OntomindState:
             state["respuesta"] = await llamar_llm(
                 PROMPT_APERTURA,
                 f"El usuario dice: {user_input}",
-                temperatura=0.7
+                temperatura=0.7,
+                forzar_openai=True
             )
         elif es_usuario_conocido:
             # Usuario que vuelve — reencuentro cálido
@@ -803,7 +819,8 @@ async def nodo_maestro(state: OntomindState) -> OntomindState:
                 ultimo = mensajes[-2] if len(mensajes) >= 2 else mensajes[-1]
                 contexto = f"Último intercambio: {ultimo.get('contenido','')}\nInput actual: {user_input}"
             state["respuesta"] = await llamar_llm(
-                PROMPT_ENCUENTRO, contexto, temperatura=0.8
+                PROMPT_ENCUENTRO, contexto, temperatura=0.8,
+                forzar_openai=True
             )
             return state
 
@@ -823,7 +840,7 @@ async def nodo_maestro(state: OntomindState) -> OntomindState:
         da = state["reporte_quiebre"].get("dominio_afectado", "")
         tv = str(state["reporte_victima"].get("tokens_victima", []))
         contexto_vigil = "INPUT: " + ui + " | RIESGO: " + nr + " | DOMINIO: " + da + " | TOKENS: " + tv
-        state["respuesta"] = await llamar_llm(PROMPT_VIGIL, contexto_vigil, temperatura=0.3)
+        state["respuesta"] = await llamar_llm(PROMPT_VIGIL, contexto_vigil, temperatura=0.3, forzar_openai=True)
         return state
 
     dictamen = state.get("dictamen", {})
@@ -1000,7 +1017,7 @@ async def nodo_evaluador(state: OntomindState) -> OntomindState:
             respuesta_maestro=state.get("respuesta", "")[:400],
             protocolo=state.get("protocolo", "normal")
         )
-        raw = await llamar_llm(prompt_eval, "", temperatura=0.1)
+        raw = await llamar_llm(prompt_eval, "", temperatura=0.1, forzar_openai=True)
 
         # Parsear JSON del evaluador
         eval_data = await parsear_json(raw)
@@ -1097,7 +1114,7 @@ async def nodo_evaluador_conversacion(state: OntomindState) -> OntomindState:
             reportes_acumulados=reportes_txt
         )
 
-        raw = await llamar_llm(prompt, "", temperatura=0.2)
+        raw = await llamar_llm(prompt, "", temperatura=0.2, forzar_openai=True)
         ev_conv = await parsear_json(raw)
 
         def sg(key, default=""): return str(ev_conv.get(key, default)).strip()
