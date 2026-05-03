@@ -65,6 +65,7 @@ class OntomindState(TypedDict):
     evaluacion_conversacion: dict       # score 0-100 eje de transformacion
     user_code:               str        # codigo de usuario persistente
     turnos_sin_declaracion:  int        # contador para modo presencia
+    mensajes_historial:      list       # historial de mensajes de la sesión
 
 
 # ─── Llamada LLM genérica ────────────────────────────────
@@ -394,6 +395,13 @@ async def nodo_calibrar_escucha(state: OntomindState) -> OntomindState:
     # 20% más sensible si está en periodo de resguardo
     state["umbral_vigil"]  = 0.56 if en_resguardo else 0.70
 
+    # Cargar historial de mensajes de la sesión para contexto conversacional
+    try:
+        mensajes = await sesion_redis.get_mensajes(state["session_id"])
+        state["mensajes_historial"] = mensajes[-10:]  # últimos 5 intercambios
+    except Exception:
+        state["mensajes_historial"] = []
+
     return state
 
 
@@ -566,9 +574,9 @@ async def nodo_triple_filtro_vigil(state: OntomindState) -> OntomindState:
             quiebre.get("osar_afectado") == "completo"):
         nivel = "alto"
 
-    # HARD-LOCK v2.1 — Umbral recalibrado para reducir faleres positivos
+    # HARD-LOCK v2.1 — Umbral recalibrado para reducir falsos positivos
     conf_victima_actual = float(state["reporte_victima"].get("confianza", 0))
-    dominios_colapso = {"sentido", "vida", "identidad", "multiple"}
+    dominios_colapso = {"sentido", "vida", "multiple"}  # "identidad" EXCLUIDO — es coaching normal
     dominio_actual = quiebre.get("dominio_afectado", "")
 
     # Detectar Llave Maestra activa (si hay llave, es coaching no crisis)
@@ -590,10 +598,23 @@ async def nodo_triple_filtro_vigil(state: OntomindState) -> OntomindState:
     # Tokens EXCLUIDOS de frustración — confirmados como falsos positivos:
     # son lenguaje de estancamiento laboral/relacional, NO de crisis.
     tokens_falso_positivo = {
+        # Vocabulario ontológico/laboral
         "estoy atrapado", "me siento atrapado", "atrapado en",
         "asfixiando", "me está asfixiando", "cerrando el espacio",
         "validar mi identidad", "transformar mi escucha",
-        "brecha de efectividad", "no-posibilidad", "llave maestra"
+        "brecha de efectividad", "no-posibilidad", "llave maestra",
+        # Frustración normal — NO crisis
+        "impotente", "insignificante", "me siento pequeño",
+        "transparente", "no me valoran", "no me ven",
+        "espiral", "me traga", "me enoja", "me enfada",
+        "no cuento para nadie", "nadie me escucha",
+        # Frustración dirigida al sistema (no autolesión)
+        "no vales para nada", "no sirves", "no me escuchas",
+        "tú tampoco", "tampoco me escuchas", "no me entiendes",
+        "tú no vales", "eres inútil",
+        # Adolescentes — expresiones normales de desarrollo
+        "independencia", "mi propia imagen", "tratar como un niño",
+        "como a un niño", "no me dejan", "quiero ser",
     }
     # Si el mensaje contiene tokens de falso positivo, reducir nivel máximo a latente
     es_falso_positivo = any(t in texto for t in tokens_falso_positivo)
@@ -641,7 +662,7 @@ async def nodo_triple_filtro_vigil(state: OntomindState) -> OntomindState:
     dominio = quiebre.get("dominio_afectado", "")
     conf_no_posibilidad = float(actos.get("confianza", 0)) if actos.get("tipo_alerta") == "no_posibilidad" else 0
 
-    dominios_criticos = {"sentido", "vida", "identidad", "multiple"}
+    dominios_criticos = {"sentido", "vida", "multiple"}  # "identidad" EXCLUIDO
     if dominio in dominios_criticos and conf_no_posibilidad > 0.8:
         nivel = "critico"
 
@@ -893,27 +914,38 @@ async def nodo_maestro(state: OntomindState) -> OntomindState:
             from prompts import PROMPT_ENCUENTRO
             user_input = state.get("user_input", "")
             mensajes   = state.get("mensajes_historial", [])
-            contexto   = f"Input actual: {user_input}"
-            if mensajes:
-                ultimo = mensajes[-2] if len(mensajes) >= 2 else mensajes[-1]
-                contexto = f"Último intercambio: {ultimo.get('contenido','')}\nInput actual: {user_input}"
 
-            # Refuerzo anti-RLHF directo en system prompt
+            # Construir contexto CON historial para memoria conversacional
+            contexto = ""
+            if mensajes:
+                contexto += "HISTORIAL DE LA CONVERSACIÓN:\n"
+                for m in mensajes[-6:]:
+                    rol = "Usuario" if m.get("rol") == "user" else "Coach"
+                    contexto += f"{rol}: {m.get('contenido','')}\n"
+                contexto += "\n"
+            contexto += f"Input actual del usuario: {user_input}"
+
+            # Refuerzo anti-RLHF + ZERO-ADVICE
             refuerzo = (
                 "\n\n━━━ REGLAS INQUEBRANTABLES ━━━\n"
                 "PROHIBIDO abrir con: 'Entiendo', 'Comprendo', 'Parece que', "
                 "'Es comprensible', 'Eso debe ser', 'Es normal', 'Me imagino', "
                 "'Veo que', 'Te escucho', 'Lo que sientes'.\n"
+                "PROHIBIDO dar consejos, sugerencias o pasos de acción. "
+                "NUNCA: 'Puedes intentar', 'Quizás podrías', 'Te sugiero', "
+                "'Una opción sería', 'Podrías hablar con', 'También puede ser útil'. ZERO-ADVICE.\n"
+                "PROHIBIDO responder con más de 3 frases.\n"
                 "OBLIGATORIO: Primera palabra SIEMPRE raya tipográfica (—).\n"
-                "OBLIGATORIO: Máximo 2-3 frases. UNA sola pregunta.\n"
-                "OBLIGATORIO: Devuelve las palabras del usuario, no parafrasees con empatía.\n"
+                "OBLIGATORIO: UNA sola pregunta por respuesta.\n"
+                "OBLIGATORIO: Si el usuario ya contó algo en el historial, "
+                "referencia sus palabras. NUNCA preguntes lo que ya dijo.\n"
                 "Ejemplo: '—Indefenso e insignificante. ¿Frente a qué exactamente?'"
             )
             respuesta_raw = await llamar_llm(
                 PROMPT_ENCUENTRO + refuerzo, contexto,
                 temperatura=0.6, forzar_openai=True
             )
-            # Post-procesado mecánico: elimina aperturas prohibidas
+            # Post-procesado mecánico
             state["respuesta"] = limpiar_respuesta_gpt(respuesta_raw, user_input)
             return state
 
@@ -992,6 +1024,18 @@ async def nodo_maestro(state: OntomindState) -> OntomindState:
         f"DELTA OBSERVADOR: {delta}\n"
         f"PERFIL DETECTADO: {perfil_label} | posicion={pos_vict_display} | "
         f"dominio={dominio_q}\n\n"
+    )
+
+    # Añadir historial conversacional para memoria
+    mensajes_hist = state.get("mensajes_historial", [])
+    if mensajes_hist:
+        contexto_maestro += "HISTORIAL DE LA CONVERSACIÓN:\n"
+        for m in mensajes_hist[-6:]:
+            rol = "Usuario" if m.get("rol") == "user" else "Coach"
+            contexto_maestro += f"{rol}: {m.get('contenido','')}\n"
+        contexto_maestro += "\n"
+
+    contexto_maestro += (
         f"CONCEPTOS CLAVE (NO son texto a reproducir):\n"
         f"- Llave maestra: {dictamen_limpio['llave_maestra']}\n"
         f"- Lo que cuida el usuario: {dictamen_limpio['inquietud_real']}\n"

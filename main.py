@@ -91,7 +91,8 @@ async def _procesar_chat(job_id: str, session_id: str,
             "evaluacion":             {},
             "evaluacion_conversacion": {},
             "turnos_sin_declaracion":  sesion.get("turnos_sin_declaracion", 0),
-            "user_code":              user_code
+            "user_code":              user_code,
+            "mensajes_historial":    []
         }
 
         # Ejecutar el grafo
