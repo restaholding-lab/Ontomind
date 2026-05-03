@@ -176,8 +176,8 @@ async def llamar_llm(system: str, user: str,
     """
     # RunPod Serverless — solo si no se fuerza OpenAI
     if USAR_RUNPOD and not forzar_openai:
-        t = 0.55 if es_maestro else temperatura
-        mx = 350 if es_maestro else 800
+        t = 0.45 if es_maestro else temperatura
+        mx = 200 if es_maestro else 800
         return await llamar_llm_runpod(system, user, temperatura=t, max_tokens=mx)
 
     # Fallback: GPT-4o-mini
@@ -257,8 +257,22 @@ async def llamar_llm_con_shots(system: str, user: str,
 
     # ── RunPod: modelo fine-tuneado para intervención ──
     if USAR_RUNPOD:
+        # Instrucciones negativas para Qwen
+        refuerzo_qwen = (
+            "\n\n━━━ RESTRICCIONES ABSOLUTAS ━━━\n"
+            "PROHIBIDO inventar hechos sobre el usuario (padres, pareja, trabajo, "
+            "colegas) que NO haya mencionado explícitamente.\n"
+            "PROHIBIDO corregir el lenguaje del usuario — escuchar primero.\n"
+            "OBLIGATORIO: UNA SOLA pregunta por respuesta.\n"
+            "OBLIGATORIO: Máximo 2-3 frases.\n"
+            "OBLIGATORIO: Primera palabra siempre raya tipográfica (—)."
+        )
+        # Inyectar refuerzo en el system message
+        if messages and messages[0]["role"] == "system":
+            messages[0]["content"] += refuerzo_qwen
+
         respuesta_raw = await llamar_llm_runpod(
-            "", "", temperatura=0.55, max_tokens=350, messages=messages
+            "", "", temperatura=0.45, max_tokens=200, messages=messages
         )
         if prefill_token and respuesta_raw and not respuesta_raw.startswith(prefill_token):
             return prefill_token + respuesta_raw
@@ -288,6 +302,66 @@ async def llamar_llm_con_shots(system: str, user: str,
     if prefill_token:
         return prefill_token + respuesta_raw
     return respuesta_raw
+
+
+import re as _re
+
+# Aperturas prohibidas que GPT-4o-mini genera por RLHF
+_APERTURAS_PROHIBIDAS = [
+    r"^Entiendo\b",
+    r"^Comprendo\b",
+    r"^Parece que\b",
+    r"^Es comprensible\b",
+    r"^Eso debe ser\b",
+    r"^Puedo ver que\b",
+    r"^Es normal\b",
+    r"^Me imagino\b",
+    r"^Qué difícil\b",
+    r"^Veo que\b",
+    r"^Siento que\b",
+    r"^Te escucho\b",
+    r"^Es válido\b",
+    r"^Lo que sientes\b",
+    r"^Lo que describes\b",
+]
+_PATRON_PROHIBIDAS = _re.compile("|".join(_APERTURAS_PROHIBIDAS), _re.IGNORECASE)
+
+def limpiar_respuesta_gpt(texto: str, user_input: str = "") -> str:
+    """
+    Post-procesado mecánico para GPT-4o-mini.
+    1. Si abre con frase prohibida, la elimina y antepone raya.
+    2. Si no empieza con raya, la añade.
+    3. Elimina preguntas duplicadas (deja solo la última).
+    """
+    texto = texto.strip()
+    if not texto:
+        return texto
+
+    # Paso 1: eliminar apertura prohibida
+    match = _PATRON_PROHIBIDAS.match(texto)
+    if match:
+        # Buscar el final de la primera frase (hasta punto o punto seguido)
+        primera_frase_end = None
+        for sep in [". ", ".\n"]:
+            pos = texto.find(sep)
+            if pos > 0:
+                primera_frase_end = pos + 1
+                break
+        if primera_frase_end:
+            texto = texto[primera_frase_end:].strip()
+        else:
+            # Si no hay punto, quitar solo la palabra prohibida + contexto genérico
+            texto = _PATRON_PROHIBIDAS.sub("", texto).strip()
+            # Limpiar conectores residuales
+            for prefijo in ["que ", "y ", "pero "]:
+                if texto.lower().startswith(prefijo):
+                    texto = texto[len(prefijo):]
+
+    # Paso 2: asegurar raya tipográfica al inicio
+    if not texto.startswith("—"):
+        texto = "—" + texto
+
+    return texto
 
 
 async def parsear_json(texto: str) -> dict:
@@ -791,12 +865,17 @@ async def nodo_maestro(state: OntomindState) -> OntomindState:
 
         if protocolo == "identidad":
             # LLM responde naturalmente a la pregunta real del usuario
-            state["respuesta"] = await llamar_llm(
-                PROMPT_APERTURA,
+            refuerzo_id = (
+                "\n\nRECORDATORIO: NUNCA abrir con 'Entiendo', 'Parece que', "
+                "'Es comprensible'. Habla como persona, no como servicio."
+            )
+            respuesta_raw = await llamar_llm(
+                PROMPT_APERTURA + refuerzo_id,
                 f"El usuario dice: {user_input}",
                 temperatura=0.7,
                 forzar_openai=True
             )
+            state["respuesta"] = limpiar_respuesta_gpt(respuesta_raw, user_input)
         elif es_usuario_conocido:
             # Usuario que vuelve — reencuentro cálido
             state["respuesta"] = random.choice(REENCUENTROS)
@@ -818,10 +897,24 @@ async def nodo_maestro(state: OntomindState) -> OntomindState:
             if mensajes:
                 ultimo = mensajes[-2] if len(mensajes) >= 2 else mensajes[-1]
                 contexto = f"Último intercambio: {ultimo.get('contenido','')}\nInput actual: {user_input}"
-            state["respuesta"] = await llamar_llm(
-                PROMPT_ENCUENTRO, contexto, temperatura=0.8,
-                forzar_openai=True
+
+            # Refuerzo anti-RLHF directo en system prompt
+            refuerzo = (
+                "\n\n━━━ REGLAS INQUEBRANTABLES ━━━\n"
+                "PROHIBIDO abrir con: 'Entiendo', 'Comprendo', 'Parece que', "
+                "'Es comprensible', 'Eso debe ser', 'Es normal', 'Me imagino', "
+                "'Veo que', 'Te escucho', 'Lo que sientes'.\n"
+                "OBLIGATORIO: Primera palabra SIEMPRE raya tipográfica (—).\n"
+                "OBLIGATORIO: Máximo 2-3 frases. UNA sola pregunta.\n"
+                "OBLIGATORIO: Devuelve las palabras del usuario, no parafrasees con empatía.\n"
+                "Ejemplo: '—Indefenso e insignificante. ¿Frente a qué exactamente?'"
             )
+            respuesta_raw = await llamar_llm(
+                PROMPT_ENCUENTRO + refuerzo, contexto,
+                temperatura=0.6, forzar_openai=True
+            )
+            # Post-procesado mecánico: elimina aperturas prohibidas
+            state["respuesta"] = limpiar_respuesta_gpt(respuesta_raw, user_input)
             return state
 
         # fase == "escucha" → el Maestro usa el input con más escucha activa
@@ -983,12 +1076,14 @@ async def nodo_maestro(state: OntomindState) -> OntomindState:
     shots     = seleccionar_few_shots(perfil_fs, llave_fs, state.get("user_input", ""))
     print(f"[FEW-SHOTS] Perfil: {perfil_fs} | Llave: {llave_fs[:30]} | Shots: {len(shots)}")
 
-    state["respuesta"] = await llamar_llm_con_shots(
+    respuesta_raw = await llamar_llm_con_shots(
         prompt_maestro_enriquecido,
         contexto_maestro,
         few_shots=shots,
         perfil=perfil_fs,
     )
+    # Post-procesado: eliminar aperturas prohibidas si GPT-4o-mini es fallback
+    state["respuesta"] = limpiar_respuesta_gpt(respuesta_raw, state.get("user_input", ""))
     return state
 
 
