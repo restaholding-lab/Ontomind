@@ -280,7 +280,14 @@ async def llamar_llm_con_shots(system: str, user: str,
             "\n━━━ VALIDACIÓN PROHIBIDA ━━━\n"
             "PROHIBIDO: 'suena profundo', 'suena difícil', 'suena duro', "
             "'eso es muy fuerte', 'qué importante', 'qué valiente'. "
-            "NO evalúes lo que dice el usuario. Devuélvelo y pregunta."
+            "NO evalúes lo que dice el usuario. Devuélvelo y pregunta.\n"
+            "\n━━━ PREGUNTAS PROHIBIDAS ━━━\n"
+            "PROHIBIDO preguntas genéricas de terapia: "
+            "'cómo te hace sentir', 'qué sientes cuando', "
+            "'cómo te sientes al respecto', 'cómo te sientes con eso'. "
+            "En su lugar, pregunta algo ESPECÍFICO sobre lo que el usuario dijo. "
+            "Incorrecto: '¿cómo te hace sentir cuando piensas en relacionarte?'\n"
+            "Correcto: '¿Desde cuándo decidiste que los demás son un peligro?'"
         )
         # Inyectar refuerzo en el system message
         if messages and messages[0]["role"] == "system":
@@ -356,16 +363,30 @@ _VALIDACION_GENERICA = [
 ]
 _PATRON_VALIDACION = _re.compile("|".join(_VALIDACION_GENERICA), _re.IGNORECASE)
 
-# Correcciones de usted → tú
+# Correcciones de usted → tú (con todas las conjugaciones)
 _USTED_A_TU = [
-    (r"\bmenciona\b", "dices"),
-    (r"\bcomenta\b", "cuentas"),
-    (r"\bindica\b", "dices"),
-    (r"\brefiere\b", "dices"),
-    (r"\bEso que menciona\b", "Eso que dices"),
-    (r"\blo que menciona\b", "lo que dices"),
-    (r"\blo que comenta\b", "lo que cuentas"),
+    (r"\bmenciona[s]?\b", "dices"),
+    (r"\bmencionas\b", "dices"),
+    (r"\bmencionando\b", "diciendo"),
+    (r"\bcomenta[s]?\b", "cuentas"),
+    (r"\bindica[s]?\b", "dices"),
+    (r"\brefiere[s]?\b", "dices"),
+    (r"\bEso que menciona[s]?\b", "Eso que dices"),
+    (r"\blo que menciona[s]?\b", "lo que dices"),
+    (r"\blo que comenta[s]?\b", "lo que cuentas"),
+    (r"\bEso que mencionas de\b", "Dices que"),
 ]
+
+# Frases genéricas de terapia que no aportan
+_FRASES_TERAPIA = [
+    r"cómo te hace sentir",
+    r"como te hace sentir",
+    r"qué sientes cuando",
+    r"qué te hace sentir",
+    r"cómo te sientes al respecto",
+    r"cómo te sientes con eso",
+]
+_PATRON_TERAPIA = _re.compile("|".join(_FRASES_TERAPIA), _re.IGNORECASE)
 
 def limpiar_respuesta_gpt(texto: str, user_input: str = "") -> str:
     """
@@ -993,6 +1014,9 @@ async def nodo_maestro(state: OntomindState) -> OntomindState:
                 "PROHIBIDO responder con más de 3 frases.\n"
                 "PROHIBIDO: 'suena profundo', 'suena difícil', 'suena duro', "
                 "'eso es muy fuerte', 'qué importante', 'qué valiente'. NO evalúes.\n"
+                "PROHIBIDO preguntas genéricas: 'cómo te hace sentir', "
+                "'qué sientes cuando', 'cómo te sientes al respecto'. "
+                "Pregunta algo ESPECÍFICO sobre lo que dijo el usuario.\n"
                 "OBLIGATORIO: Primera palabra SIEMPRE raya tipográfica (—).\n"
                 "OBLIGATORIO: UNA sola pregunta por respuesta.\n"
                 "OBLIGATORIO: Siempre de TÚ, nunca de USTED. "
