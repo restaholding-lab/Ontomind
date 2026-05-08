@@ -287,7 +287,12 @@ async def llamar_llm_con_shots(system: str, user: str,
             "'cómo te sientes al respecto', 'cómo te sientes con eso'. "
             "En su lugar, pregunta algo ESPECÍFICO sobre lo que el usuario dijo. "
             "Incorrecto: '¿cómo te hace sentir cuando piensas en relacionarte?'\n"
-            "Correcto: '¿Desde cuándo decidiste que los demás son un peligro?'"
+            "Correcto: '¿Desde cuándo decidiste que los demás son un peligro?'\n"
+            "\n━━━ SIN ENVOLTORIO ━━━\n"
+            "PROHIBIDO empezar con 'Eso que dices de', 'Lo que dices sobre', "
+            "'Lo que cuentas de'. Ve DIRECTO a las palabras del usuario.\n"
+            "Incorrecto: '—Eso que dices de que piensas que estás mejor en tu soledad...'\n"
+            "Correcto: '—Mejor en tu soledad. ¿Desde cuándo decidiste que estar con otros era peligroso?'"
         )
         # Inyectar refuerzo en el system message
         if messages and messages[0]["role"] == "system":
@@ -403,6 +408,26 @@ def limpiar_respuesta_gpt(texto: str, user_input: str = "") -> str:
     # Paso 0: corregir usted → tú
     for patron, reemplazo in _USTED_A_TU:
         texto = _re.sub(patron, reemplazo, texto, flags=_re.IGNORECASE)
+
+    # Paso 0a: eliminar envoltorios innecesarios
+    _envoltorios = [
+        r"^—?Eso que dices de que ",
+        r"^—?Eso que dices de ",
+        r"^—?Eso que dices sobre ",
+        r"^—?Lo que dices de que ",
+        r"^—?Lo que dices de ",
+        r"^—?Lo que dices sobre ",
+        r"^—?Lo que cuentas de que ",
+        r"^—?Lo que cuentas de ",
+        r"^—?Lo que cuentas sobre ",
+    ]
+    for env in _envoltorios:
+        if _re.match(env, texto, _re.IGNORECASE):
+            texto = _re.sub(env, "—", texto, count=1, flags=_re.IGNORECASE)
+            # Capitalizar la primera palabra después de la raya
+            if len(texto) > 1 and texto[0] == "—":
+                texto = "—" + texto[1].upper() + texto[2:]
+            break
 
     # Paso 0b: eliminar frases de validación genérica
     for match_val in _PATRON_VALIDACION.finditer(texto):
@@ -1017,6 +1042,10 @@ async def nodo_maestro(state: OntomindState) -> OntomindState:
                 "PROHIBIDO preguntas genéricas: 'cómo te hace sentir', "
                 "'qué sientes cuando', 'cómo te sientes al respecto'. "
                 "Pregunta algo ESPECÍFICO sobre lo que dijo el usuario.\n"
+                "PROHIBIDO empezar con 'Eso que dices de', 'Lo que dices sobre', "
+                "'Lo que cuentas de'. Ve DIRECTO a las palabras del usuario.\n"
+                "Incorrecto: '—Eso que dices de que piensas que estás mejor en tu soledad...'\n"
+                "Correcto: '—Mejor en tu soledad. ¿Desde cuándo decidiste que estar con otros era peligroso?'"
                 "OBLIGATORIO: Primera palabra SIEMPRE raya tipográfica (—).\n"
                 "OBLIGATORIO: UNA sola pregunta por respuesta.\n"
                 "OBLIGATORIO: Siempre de TÚ, nunca de USTED. "
