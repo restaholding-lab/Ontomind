@@ -258,7 +258,7 @@ async def llamar_llm_con_shots(system: str, user: str,
 
     # ── RunPod: modelo fine-tuneado para intervención ──
     if USAR_RUNPOD:
-        # Instrucciones negativas para Qwen
+        # Instrucciones negativas para Qwen v2
         refuerzo_qwen = (
             "\n\n━━━ RESTRICCIONES ABSOLUTAS ━━━\n"
             "PROHIBIDO inventar hechos sobre el usuario (padres, pareja, trabajo, "
@@ -266,7 +266,21 @@ async def llamar_llm_con_shots(system: str, user: str,
             "PROHIBIDO corregir el lenguaje del usuario — escuchar primero.\n"
             "OBLIGATORIO: UNA SOLA pregunta por respuesta.\n"
             "OBLIGATORIO: Máximo 2-3 frases.\n"
-            "OBLIGATORIO: Primera palabra siempre raya tipográfica (—)."
+            "OBLIGATORIO: Primera palabra siempre raya tipográfica (—).\n"
+            "\n━━━ TUTEO OBLIGATORIO ━━━\n"
+            "Siempre de TÚ, nunca de USTED. "
+            "PROHIBIDO: 'menciona', 'comenta', 'indica', 'refiere'. "
+            "CORRECTO: 'dices', 'cuentas', 'sientes', 'quieres'. "
+            "Ejemplo incorrecto: 'Eso que menciona sobre sentir...'\n"
+            "Ejemplo correcto: 'Dices que estás mejor en tu soledad.'\n"
+            "\n━━━ PALABRAS EXACTAS ━━━\n"
+            "USA las palabras EXACTAS del usuario, no parafrasees. "
+            "Si el usuario dijo 'mejor en mi soledad', tu respuesta debe "
+            "contener 'mejor en tu soledad', no 'que prefieres estar solo'.\n"
+            "\n━━━ VALIDACIÓN PROHIBIDA ━━━\n"
+            "PROHIBIDO: 'suena profundo', 'suena difícil', 'suena duro', "
+            "'eso es muy fuerte', 'qué importante', 'qué valiente'. "
+            "NO evalúes lo que dice el usuario. Devuélvelo y pregunta."
         )
         # Inyectar refuerzo en el system message
         if messages and messages[0]["role"] == "system":
@@ -327,21 +341,62 @@ _APERTURAS_PROHIBIDAS = [
 ]
 _PATRON_PROHIBIDAS = _re.compile("|".join(_APERTURAS_PROHIBIDAS), _re.IGNORECASE)
 
+# Validación genérica que ambos modelos generan
+_VALIDACION_GENERICA = [
+    r"suena bastante profundo",
+    r"suena profundo",
+    r"suena difícil",
+    r"suena duro",
+    r"suena muy fuerte",
+    r"eso es muy fuerte",
+    r"eso es muy valiente",
+    r"qué importante",
+    r"qué valiente",
+    r"es muy valioso",
+]
+_PATRON_VALIDACION = _re.compile("|".join(_VALIDACION_GENERICA), _re.IGNORECASE)
+
+# Correcciones de usted → tú
+_USTED_A_TU = [
+    (r"\bmenciona\b", "dices"),
+    (r"\bcomenta\b", "cuentas"),
+    (r"\bindica\b", "dices"),
+    (r"\brefiere\b", "dices"),
+    (r"\bEso que menciona\b", "Eso que dices"),
+    (r"\blo que menciona\b", "lo que dices"),
+    (r"\blo que comenta\b", "lo que cuentas"),
+]
+
 def limpiar_respuesta_gpt(texto: str, user_input: str = "") -> str:
     """
-    Post-procesado mecánico para GPT-4o-mini.
-    1. Si abre con frase prohibida, la elimina y antepone raya.
-    2. Si no empieza con raya, la añade.
-    3. Elimina preguntas duplicadas (deja solo la última).
+    Post-procesado mecánico para ambos modelos.
+    1. Corrige usted → tú.
+    2. Elimina validación genérica.
+    3. Si abre con frase prohibida, la elimina y antepone raya.
+    4. Si no empieza con raya, la añade.
     """
     texto = texto.strip()
     if not texto:
         return texto
 
+    # Paso 0: corregir usted → tú
+    for patron, reemplazo in _USTED_A_TU:
+        texto = _re.sub(patron, reemplazo, texto, flags=_re.IGNORECASE)
+
+    # Paso 0b: eliminar frases de validación genérica
+    for match_val in _PATRON_VALIDACION.finditer(texto):
+        # Buscar la frase completa que contiene la validación
+        start = texto.rfind(".", 0, match_val.start())
+        end = texto.find(".", match_val.end())
+        if start >= 0 and end >= 0:
+            frase_validacion = texto[start+1:end+1]
+            texto = texto.replace(frase_validacion, "").strip()
+        elif end >= 0:
+            texto = texto[end+1:].strip()
+
     # Paso 1: eliminar apertura prohibida
     match = _PATRON_PROHIBIDAS.match(texto)
     if match:
-        # Buscar el final de la primera frase (hasta punto o punto seguido)
         primera_frase_end = None
         for sep in [". ", ".\n"]:
             pos = texto.find(sep)
@@ -351,9 +406,7 @@ def limpiar_respuesta_gpt(texto: str, user_input: str = "") -> str:
         if primera_frase_end:
             texto = texto[primera_frase_end:].strip()
         else:
-            # Si no hay punto, quitar solo la palabra prohibida + contexto genérico
             texto = _PATRON_PROHIBIDAS.sub("", texto).strip()
-            # Limpiar conectores residuales
             for prefijo in ["que ", "y ", "pero "]:
                 if texto.lower().startswith(prefijo):
                     texto = texto[len(prefijo):]
@@ -361,6 +414,9 @@ def limpiar_respuesta_gpt(texto: str, user_input: str = "") -> str:
     # Paso 2: asegurar raya tipográfica al inicio
     if not texto.startswith("—"):
         texto = "—" + texto
+
+    # Paso 3: limpiar espacios dobles residuales
+    texto = _re.sub(r"  +", " ", texto).strip()
 
     return texto
 
@@ -925,7 +981,7 @@ async def nodo_maestro(state: OntomindState) -> OntomindState:
                 contexto += "\n"
             contexto += f"Input actual del usuario: {user_input}"
 
-            # Refuerzo anti-RLHF + ZERO-ADVICE
+            # Refuerzo anti-RLHF + ZERO-ADVICE + TUTEO + PALABRAS EXACTAS
             refuerzo = (
                 "\n\n━━━ REGLAS INQUEBRANTABLES ━━━\n"
                 "PROHIBIDO abrir con: 'Entiendo', 'Comprendo', 'Parece que', "
@@ -935,11 +991,18 @@ async def nodo_maestro(state: OntomindState) -> OntomindState:
                 "NUNCA: 'Puedes intentar', 'Quizás podrías', 'Te sugiero', "
                 "'Una opción sería', 'Podrías hablar con', 'También puede ser útil'. ZERO-ADVICE.\n"
                 "PROHIBIDO responder con más de 3 frases.\n"
+                "PROHIBIDO: 'suena profundo', 'suena difícil', 'suena duro', "
+                "'eso es muy fuerte', 'qué importante', 'qué valiente'. NO evalúes.\n"
                 "OBLIGATORIO: Primera palabra SIEMPRE raya tipográfica (—).\n"
                 "OBLIGATORIO: UNA sola pregunta por respuesta.\n"
+                "OBLIGATORIO: Siempre de TÚ, nunca de USTED. "
+                "PROHIBIDO: 'menciona', 'comenta', 'indica'. "
+                "CORRECTO: 'dices', 'cuentas', 'sientes'.\n"
+                "OBLIGATORIO: Usa las PALABRAS EXACTAS del usuario, no parafrasees. "
+                "Si dijo 'mejor en mi soledad', repite 'mejor en tu soledad'.\n"
                 "OBLIGATORIO: Si el usuario ya contó algo en el historial, "
                 "referencia sus palabras. NUNCA preguntes lo que ya dijo.\n"
-                "Ejemplo: '—Indefenso e insignificante. ¿Frente a qué exactamente?'"
+                "Ejemplo: '—Mejor en tu soledad. ¿Desde cuándo decidiste que los demás son un peligro?'"
             )
             respuesta_raw = await llamar_llm(
                 PROMPT_ENCUENTRO + refuerzo, contexto,
