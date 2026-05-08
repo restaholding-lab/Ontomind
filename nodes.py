@@ -1027,39 +1027,36 @@ async def nodo_maestro(state: OntomindState) -> OntomindState:
                 contexto += "\n"
             contexto += f"Input actual del usuario: {user_input}"
 
-            # Refuerzo anti-RLHF + ZERO-ADVICE + TUTEO + PALABRAS EXACTAS
+            # Refuerzo EXPLORATORIO — crear espacio, no interrogar
             refuerzo = (
                 "\n\n━━━ REGLAS INQUEBRANTABLES ━━━\n"
                 "PROHIBIDO abrir con: 'Entiendo', 'Comprendo', 'Parece que', "
                 "'Es comprensible', 'Eso debe ser', 'Es normal', 'Me imagino', "
                 "'Veo que', 'Te escucho', 'Lo que sientes'.\n"
-                "PROHIBIDO dar consejos, sugerencias o pasos de acción. "
-                "NUNCA: 'Puedes intentar', 'Quizás podrías', 'Te sugiero', "
-                "'Una opción sería', 'Podrías hablar con', 'También puede ser útil'. ZERO-ADVICE.\n"
-                "PROHIBIDO responder con más de 3 frases.\n"
-                "PROHIBIDO: 'suena profundo', 'suena difícil', 'suena duro', "
-                "'eso es muy fuerte', 'qué importante', 'qué valiente'. NO evalúes.\n"
+                "PROHIBIDO dar consejos o sugerencias. ZERO-ADVICE.\n"
                 "PROHIBIDO preguntas genéricas: 'cómo te hace sentir', "
-                "'qué sientes cuando', 'cómo te sientes al respecto'. "
-                "Pregunta algo ESPECÍFICO sobre lo que dijo el usuario.\n"
-                "PROHIBIDO empezar con 'Eso que dices de', 'Lo que dices sobre', "
-                "'Lo que cuentas de'. Ve DIRECTO a las palabras del usuario.\n"
-                "Incorrecto: '—Eso que dices de que piensas que estás mejor en tu soledad...'\n"
-                "Correcto: '—Mejor en tu soledad. ¿Desde cuándo decidiste que estar con otros era peligroso?'"
-                "OBLIGATORIO: Primera palabra SIEMPRE raya tipográfica (—).\n"
-                "OBLIGATORIO: UNA sola pregunta por respuesta.\n"
-                "OBLIGATORIO: Siempre de TÚ, nunca de USTED. "
-                "PROHIBIDO: 'menciona', 'comenta', 'indica'. "
-                "CORRECTO: 'dices', 'cuentas', 'sientes'.\n"
-                "OBLIGATORIO: Usa las PALABRAS EXACTAS del usuario, no parafrasees. "
-                "Si dijo 'mejor en mi soledad', repite 'mejor en tu soledad'.\n"
-                "OBLIGATORIO: Si el usuario ya contó algo en el historial, "
-                "referencia sus palabras. NUNCA preguntes lo que ya dijo.\n"
-                "Ejemplo: '—Mejor en tu soledad. ¿Desde cuándo decidiste que los demás son un peligro?'"
+                "'qué sientes cuando', 'cómo te sientes al respecto'.\n"
+                "PROHIBIDO empezar con 'Eso que dices de', 'Lo que dices sobre'.\n"
+                "Siempre de TÚ. PROHIBIDO: 'menciona', 'comenta', 'indica'.\n"
+                "Primera palabra SIEMPRE raya tipográfica (—).\n"
+                "UNA sola pregunta por respuesta (pero SÍ observaciones antes).\n"
+                "\n━━━ ESTILO EXPLORATORIO ━━━\n"
+                "NO seas telegráfico — crea CONTEXTO antes de preguntar.\n"
+                "Devuelve las palabras EXACTAS del usuario y añade algo que no habían "
+                "considerado — un matiz, una distinción, un espejo suave.\n"
+                "Tu respuesta debe hacer que el usuario QUIERA contar más.\n"
+                "Responde con 3-6 frases si el usuario te dio material.\n"
+                "Ejemplo:\n"
+                "'—Mejor en tu soledad. Hay algo ahí que merece atención, "
+                "porque la soledad que se elige no duele — y la tuya parece "
+                "que sí. Dices que no sabes si no tienes nada que aportar o "
+                "si no crees en los demás. Son dos cosas muy distintas: una "
+                "habla de ti y otra habla de ellos. ¿Cuál de las dos pesa más "
+                "cuando decides no coger el teléfono?'"
             )
             respuesta_raw = await llamar_llm(
                 PROMPT_ENCUENTRO + refuerzo, contexto,
-                temperatura=0.6, forzar_openai=True
+                temperatura=0.7, forzar_openai=True
             )
             # Post-procesado mecánico
             state["respuesta"] = limpiar_respuesta_gpt(respuesta_raw, user_input)
