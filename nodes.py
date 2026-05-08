@@ -1056,7 +1056,7 @@ async def nodo_maestro(state: OntomindState) -> OntomindState:
             )
             respuesta_raw = await llamar_llm(
                 PROMPT_ENCUENTRO + refuerzo, contexto,
-                temperatura=0.7, forzar_openai=True
+                temperatura=0.7, forzar_openai=False
             )
             # Post-procesado mecánico
             state["respuesta"] = limpiar_respuesta_gpt(respuesta_raw, user_input)
