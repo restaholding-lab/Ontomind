@@ -433,7 +433,9 @@ def limpiar_respuesta_gpt(texto: str, user_input: str = "") -> str:
         r"^—?Lo que cuentas de ",
         r"^—?Lo que cuentas sobre ",
         r"^—?Te sigue costando ",
+        r"^—?Me sigue costando ",
         r"^—?Costándote ",
+        r"^—?Te cuesta ",
     ]
     for env in _envoltorios:
         if _re.match(env, texto, _re.IGNORECASE):
@@ -442,46 +444,10 @@ def limpiar_respuesta_gpt(texto: str, user_input: str = "") -> str:
                 texto = "—" + texto[1].upper() + texto[2:]
             break
 
-    # Paso 1: FILTRADO POR FRASES — eliminar frases con terapia-speak
-    # Patrones que invalidan una frase completa
-    _patrones_frase_toxica = [
-        r"sugiere que",
-        r"lo que sugiere",
-        r"podría indicar",
-        r"podría haber algo",
-        r"algo más profundo",
-        r"es interesante cómo",
-        r"es interesante que",
-        r"es curioso que",
-        r"es significativo",
-        r"llama la atención",
-        r"suena profundo",
-        r"suena bastante profundo",
-        r"suena difícil",
-        r"suena duro",
-        r"qué valiente",
-        r"qué importante",
-        r"es muy valioso",
-        r"la soledad puede ser",
-        r"a veces las cosas",
-        r"esa repetición sugiere",
-        r"hay un patrón que",
-        r"algo que te frena",
-    ]
-    patron_toxica = _re.compile("|".join(_patrones_frase_toxica), _re.IGNORECASE)
-
-    # Separar en frases, filtrar las tóxicas, reagrupar
-    frases = _re.split(r'(?<=[.!?])\s+', texto)
-    frases_limpias = []
-    for frase in frases:
-        frase = frase.strip()
-        if not frase:
-            continue
-        if patron_toxica.search(frase):
-            continue  # Eliminar frase completa
-        frases_limpias.append(frase)
-
-    texto = " ".join(frases_limpias) if frases_limpias else texto
+    # Paso 1: FILTRADO LIGERO — solo los patrones más tóxicos
+    # Paso 1: Reemplazos suaves (no rompen gramática)
+    # Solo eliminar "Esa repetición" como frase introductoria si aparece
+    texto = _re.sub(r"\. Esa repetición[^.]*\.", ".", texto)
 
     # Paso 2: eliminar apertura prohibida (puede haber quedado tras filtrado)
     texto_sin_raya = texto.lstrip("—").strip()
