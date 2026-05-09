@@ -410,11 +410,8 @@ _PATRON_TERAPIA = _re.compile("|".join(_FRASES_TERAPIA), _re.IGNORECASE)
 
 def limpiar_respuesta_gpt(texto: str, user_input: str = "") -> str:
     """
-    Post-procesado mecánico para ambos modelos.
-    1. Corrige usted → tú.
-    2. Elimina validación genérica.
-    3. Si abre con frase prohibida, la elimina y antepone raya.
-    4. Si no empieza con raya, la añade.
+    Post-procesado mecánico agresivo.
+    Filtra frases completas con patrones de terapia-speak.
     """
     texto = texto.strip()
     if not texto:
@@ -435,49 +432,81 @@ def limpiar_respuesta_gpt(texto: str, user_input: str = "") -> str:
         r"^—?Lo que cuentas de que ",
         r"^—?Lo que cuentas de ",
         r"^—?Lo que cuentas sobre ",
+        r"^—?Te sigue costando ",
+        r"^—?Costándote ",
     ]
     for env in _envoltorios:
         if _re.match(env, texto, _re.IGNORECASE):
             texto = _re.sub(env, "—", texto, count=1, flags=_re.IGNORECASE)
-            # Capitalizar la primera palabra después de la raya
             if len(texto) > 1 and texto[0] == "—":
                 texto = "—" + texto[1].upper() + texto[2:]
             break
 
-    # Paso 0b: eliminar frases de validación genérica
-    for match_val in _PATRON_VALIDACION.finditer(texto):
-        # Buscar la frase completa que contiene la validación
-        start = texto.rfind(".", 0, match_val.start())
-        end = texto.find(".", match_val.end())
-        if start >= 0 and end >= 0:
-            frase_validacion = texto[start+1:end+1]
-            texto = texto.replace(frase_validacion, "").strip()
-        elif end >= 0:
-            texto = texto[end+1:].strip()
+    # Paso 1: FILTRADO POR FRASES — eliminar frases con terapia-speak
+    # Patrones que invalidan una frase completa
+    _patrones_frase_toxica = [
+        r"sugiere que",
+        r"lo que sugiere",
+        r"podría indicar",
+        r"podría haber algo",
+        r"algo más profundo",
+        r"es interesante cómo",
+        r"es interesante que",
+        r"es curioso que",
+        r"es significativo",
+        r"llama la atención",
+        r"suena profundo",
+        r"suena bastante profundo",
+        r"suena difícil",
+        r"suena duro",
+        r"qué valiente",
+        r"qué importante",
+        r"es muy valioso",
+        r"la soledad puede ser",
+        r"a veces las cosas",
+        r"esa repetición sugiere",
+        r"hay un patrón que",
+        r"algo que te frena",
+    ]
+    patron_toxica = _re.compile("|".join(_patrones_frase_toxica), _re.IGNORECASE)
 
-    # Paso 1: eliminar apertura prohibida
-    match = _PATRON_PROHIBIDAS.match(texto)
+    # Separar en frases, filtrar las tóxicas, reagrupar
+    frases = _re.split(r'(?<=[.!?])\s+', texto)
+    frases_limpias = []
+    for frase in frases:
+        frase = frase.strip()
+        if not frase:
+            continue
+        if patron_toxica.search(frase):
+            continue  # Eliminar frase completa
+        frases_limpias.append(frase)
+
+    texto = " ".join(frases_limpias) if frases_limpias else texto
+
+    # Paso 2: eliminar apertura prohibida (puede haber quedado tras filtrado)
+    texto_sin_raya = texto.lstrip("—").strip()
+    match = _PATRON_PROHIBIDAS.match(texto_sin_raya)
     if match:
         primera_frase_end = None
         for sep in [". ", ".\n"]:
-            pos = texto.find(sep)
+            pos = texto_sin_raya.find(sep)
             if pos > 0:
                 primera_frase_end = pos + 1
                 break
         if primera_frase_end:
-            texto = texto[primera_frase_end:].strip()
+            texto_sin_raya = texto_sin_raya[primera_frase_end:].strip()
         else:
-            texto = _PATRON_PROHIBIDAS.sub("", texto).strip()
-            for prefijo in ["que ", "y ", "pero "]:
-                if texto.lower().startswith(prefijo):
-                    texto = texto[len(prefijo):]
+            texto_sin_raya = _PATRON_PROHIBIDAS.sub("", texto_sin_raya).strip()
+        texto = texto_sin_raya
 
-    # Paso 2: asegurar raya tipográfica al inicio
+    # Paso 3: asegurar raya tipográfica al inicio
     if not texto.startswith("—"):
         texto = "—" + texto
 
-    # Paso 3: limpiar espacios dobles residuales
-    texto = _re.sub(r"  +", " ", texto).strip()
+    # Paso 4: limpiar espacios dobles y puntos dobles
+    texto = _re.sub(r"  +", " ", texto)
+    texto = _re.sub(r"\.\.", ".", texto)
+    texto = texto.strip()
 
     return texto
 
