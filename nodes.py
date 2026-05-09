@@ -333,7 +333,7 @@ async def llamar_llm_con_shots(system: str, user: str,
 
 import re as _re
 
-# Aperturas prohibidas que GPT-4o-mini genera por RLHF
+# Aperturas prohibidas que GPT-4o-mini y Qwen generan
 _APERTURAS_PROHIBIDAS = [
     r"^Entiendo\b",
     r"^Comprendo\b",
@@ -350,10 +350,14 @@ _APERTURAS_PROHIBIDAS = [
     r"^Es válido\b",
     r"^Lo que sientes\b",
     r"^Lo que describes\b",
+    r"^Es interesante\b",
+    r"^Es curioso\b",
+    r"^Costándote\b",
+    r"^Llama la atención\b",
 ]
 _PATRON_PROHIBIDAS = _re.compile("|".join(_APERTURAS_PROHIBIDAS), _re.IGNORECASE)
 
-# Validación genérica que ambos modelos generan
+# Validación genérica y terapia-speak que ambos modelos generan
 _VALIDACION_GENERICA = [
     r"suena bastante profundo",
     r"suena profundo",
@@ -365,6 +369,17 @@ _VALIDACION_GENERICA = [
     r"qué importante",
     r"qué valiente",
     r"es muy valioso",
+    r"es interesante cómo",
+    r"es interesante que",
+    r"es curioso que",
+    r"es significativo",
+    r"llama la atención que",
+    r"lo que sugiere",
+    r"eso podría indicar",
+    r"podría haber algo más profundo",
+    r"algo más profundo detrás",
+    r"la soledad puede ser un refugio",
+    r"a veces las cosas no son",
 ]
 _PATRON_VALIDACION = _re.compile("|".join(_VALIDACION_GENERICA), _re.IGNORECASE)
 
@@ -1027,32 +1042,55 @@ async def nodo_maestro(state: OntomindState) -> OntomindState:
                 contexto += "\n"
             contexto += f"Input actual del usuario: {user_input}"
 
-            # Refuerzo EXPLORATORIO — crear espacio, no interrogar
+            # Refuerzo EXPLORATORIO con few-shots concretos
             refuerzo = (
                 "\n\n━━━ REGLAS INQUEBRANTABLES ━━━\n"
                 "PROHIBIDO abrir con: 'Entiendo', 'Comprendo', 'Parece que', "
                 "'Es comprensible', 'Eso debe ser', 'Es normal', 'Me imagino', "
-                "'Veo que', 'Te escucho', 'Lo que sientes'.\n"
+                "'Veo que', 'Te escucho', 'Lo que sientes', 'Es interesante'.\n"
+                "PROHIBIDO evaluar: 'es interesante cómo dices', 'es curioso que', "
+                "'llama la atención que', 'es significativo'. NO eres un observador externo.\n"
+                "PROHIBIDO diagnosticar: 'lo que sugiere', 'eso podría indicar', "
+                "'parece haber algo más profundo', 'podría ser que'. NO interpretes.\n"
+                "PROHIBIDO observaciones genéricas: 'la soledad puede ser un refugio', "
+                "'a veces las cosas no son lo que parecen', 'hay algo detrás'. Sé CONCRETO.\n"
+                "PROHIBIDO preguntas genéricas: 'cómo te hace sentir', 'qué sientes', "
+                "'qué te genera', 'cómo te sientes al respecto'.\n"
                 "PROHIBIDO dar consejos o sugerencias. ZERO-ADVICE.\n"
-                "PROHIBIDO preguntas genéricas: 'cómo te hace sentir', "
-                "'qué sientes cuando', 'cómo te sientes al respecto'.\n"
-                "PROHIBIDO empezar con 'Eso que dices de', 'Lo que dices sobre'.\n"
                 "Siempre de TÚ. PROHIBIDO: 'menciona', 'comenta', 'indica'.\n"
                 "Primera palabra SIEMPRE raya tipográfica (—).\n"
                 "UNA sola pregunta por respuesta (pero SÍ observaciones antes).\n"
-                "\n━━━ ESTILO EXPLORATORIO ━━━\n"
-                "NO seas telegráfico — crea CONTEXTO antes de preguntar.\n"
-                "Devuelve las palabras EXACTAS del usuario y añade algo que no habían "
-                "considerado — un matiz, una distinción, un espejo suave.\n"
-                "Tu respuesta debe hacer que el usuario QUIERA contar más.\n"
-                "Responde con 3-6 frases si el usuario te dio material.\n"
-                "Ejemplo:\n"
-                "'—Mejor en tu soledad. Hay algo ahí que merece atención, "
-                "porque la soledad que se elige no duele — y la tuya parece "
-                "que sí. Dices que no sabes si no tienes nada que aportar o "
-                "si no crees en los demás. Son dos cosas muy distintas: una "
-                "habla de ti y otra habla de ellos. ¿Cuál de las dos pesa más "
-                "cuando decides no coger el teléfono?'"
+                "\n━━━ CÓMO RESPONDER ━━━\n"
+                "1. ABRE con las palabras EXACTAS del usuario (no parafrasees)\n"
+                "2. AÑADE algo que el usuario no ha considerado — un matiz, una distinción\n"
+                "3. CIERRA con UNA pregunta específica sobre lo que dijo\n"
+                "\n━━━ EJEMPLOS DE RESPUESTA CORRECTA ━━━\n"
+                "\nUsuario: 'Me sigue costando relacionarme, siempre pienso que estoy "
+                "mejor en mi soledad. No sé si no tengo que aportar o si no creo en los demás.'\n"
+                "Coach: '—Mejor en tu soledad. Hay algo ahí que merece atención, "
+                "porque la soledad que se elige no duele — y la tuya parece que sí. "
+                "Dices que no sabes si no tienes nada que aportar o si no crees en los demás. "
+                "Son dos cosas muy distintas: una habla de ti y otra habla de ellos. "
+                "¿Cuál de las dos pesa más cuando decides no coger el teléfono?'\n"
+                "\nUsuario: 'No sé qué hago aquí. Tengo 45 años, trabajo estable, familia. "
+                "No me puedo quejar. Pero hay algo que no funciona.'\n"
+                "Coach: '—No te puedes quejar. Esa frase dice más de lo que parece, "
+                "porque el que no se puede quejar no es el que no tiene motivos — es el "
+                "que no se da permiso para mirar lo que le falta. Trabajo, familia, estabilidad. "
+                "Todo lo que se supone que debería ser suficiente. Y sin embargo estás aquí. "
+                "¿Qué parte de tu vida sientes que no es tuya?'\n"
+                "\nUsuario: 'Discuto con todo el mundo. Con mi pareja, mis hijos, los compañeros. "
+                "Sé que soy yo quien lo genera.'\n"
+                "Coach: '—Ya ves que eres tú quien lo genera. Eso no es poca cosa — "
+                "la mayoría de la gente que discute con todo el mundo está convencida de que "
+                "el problema son los demás. Tú no. Ves el patrón. Lo que todavía no ves es "
+                "qué hay debajo. ¿Qué crees que estás defendiendo en esas discusiones?'\n"
+                "\n━━━ EJEMPLO DE RESPUESTA INCORRECTA ━━━\n"
+                "INCORRECTO: '—Costándote relacionarte. Es interesante cómo dices que "
+                "piensas que estás mejor en tu soledad, lo que sugiere que podría haber algo "
+                "más profundo. ¿Qué sientes al pensar en eso?'\n"
+                "POR QUÉ FALLA: evalúa ('es interesante'), diagnostica ('sugiere'), "
+                "observación genérica ('algo más profundo'), pregunta genérica ('qué sientes')."
             )
             respuesta_raw = await llamar_llm(
                 PROMPT_ENCUENTRO + refuerzo, contexto,
