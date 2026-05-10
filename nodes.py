@@ -18,6 +18,7 @@ from rag import recuperar_contexto, formatear_contexto
 from memory import mapa_observador, sesion_redis
 
 OPENAI_API_KEY    = "".join(os.getenv("OPENAI_API_KEY", "").split())
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "").strip()
 QDRANT_URL        = os.getenv("QDRANT_URL", "").strip()
 QDRANT_API_KEY    = os.getenv("QDRANT_API_KEY", "").strip()
 OPENAI_MODEL      = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
@@ -216,6 +217,47 @@ async def llamar_llm(system: str, user: str,
         r.raise_for_status()
         return r.json()["choices"][0]["message"]["content"].strip()
 
+
+async def llamar_claude(system: str, user: str,
+                        temperatura: float = 0.7,
+                        max_tokens: int = 500) -> str:
+    """
+    Llamada a Claude (Anthropic API) para encuentro/escucha.
+    Claude sigue instrucciones complejas de estilo mejor que GPT-4o-mini y Qwen.
+    """
+    if not ANTHROPIC_API_KEY:
+        print("[CLAUDE] API key no configurada — fallback a GPT-4o-mini")
+        return await llamar_llm(system, user, temperatura=temperatura, forzar_openai=True)
+
+    async with httpx.AsyncClient(timeout=90) as client:
+        try:
+            r = await client.post(
+                "https://api.anthropic.com/v1/messages",
+                headers={
+                    "x-api-key": ANTHROPIC_API_KEY,
+                    "anthropic-version": "2023-06-01",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": "claude-sonnet-4-20250514",
+                    "max_tokens": max_tokens,
+                    "temperature": temperatura,
+                    "system": system,
+                    "messages": [
+                        {"role": "user", "content": user}
+                    ]
+                }
+            )
+            r.raise_for_status()
+            data = r.json()
+            # Claude devuelve content como lista de bloques
+            content = data.get("content", [])
+            if content and isinstance(content, list):
+                return content[0].get("text", "").strip()
+            return ""
+        except Exception as e:
+            print(f"[CLAUDE] Error: {e} — fallback a GPT-4o-mini")
+            return await llamar_llm(system, user, temperatura=temperatura, forzar_openai=True)
 
 
 async def llamar_llm_con_shots(system: str, user: str,
@@ -1087,9 +1129,9 @@ async def nodo_maestro(state: OntomindState) -> OntomindState:
                 "POR QUÉ FALLA: evalúa ('es interesante'), diagnostica ('sugiere'), "
                 "observación genérica ('algo más profundo'), pregunta genérica ('qué sientes')."
             )
-            respuesta_raw = await llamar_llm(
+            respuesta_raw = await llamar_claude(
                 PROMPT_ENCUENTRO + refuerzo, contexto,
-                temperatura=0.7, forzar_openai=False
+                temperatura=0.7, max_tokens=500
             )
             # Post-procesado mecánico
             state["respuesta"] = limpiar_respuesta_gpt(respuesta_raw, user_input)
