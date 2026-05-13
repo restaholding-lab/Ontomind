@@ -1,19 +1,19 @@
-# â”€â”€â”€ LIBROS (PDFs con texto seleccionable) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-pdfplumber==0.11.4        # ExtracciÃ³n de texto con layout preservado
-pymupdf==1.24.14          # PyMuPDF: renderiza pÃ¡ginas como imagen + metadatos
-pypdf==4.3.1              # Operaciones bÃ¡sicas sobre PDFs
-# â”€â”€â”€ CÃ“MICS / VIÃ‘ETAS (OCR sobre imÃ¡genes) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-paddlepaddle==2.6.1       # Motor base de PaddleOCR (CPU)
-paddleocr==2.8.1          # OCR multilingÃ¼e con detecciÃ³n de regiones de texto
-Pillow==10.4.0            # Procesamiento de imÃ¡genes
-opencv-python-headless==4.10.0.84  # VisiÃ³n computacional para preprocesado
-# â”€â”€â”€ AUDIO / VÃDEO (TranscripciÃ³n) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-openai-whisper==20231117  # Modelo de transcripciÃ³n local de OpenAI
-ffmpeg-python==0.2.0      # Wrapper Python para FFmpeg (extracciÃ³n de audio)
-# â”€â”€â”€ POST-PROCESADO & UTILIDADES â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-langdetect==1.0.9         # DetecciÃ³n automÃ¡tica de idioma
-tqdm==4.66.5              # Barras de progreso
-rich==13.8.1              # Logging con color en terminal
-click==8.1.7              # CLI elegante
-python-dotenv==1.0.1      # Variables de entorno
+# Backend ONTOMIND — dependencias del servidor Railway
+fastapi
+uvicorn[standard]
+httpx==0.28.1
+redis[asyncio]
+python-dotenv==1.0.1
+openai==2.32.0
 anthropic==0.101.0
+qdrant-client==1.17.1
+Pillow==10.4.0
+langdetect==1.0.9
+tqdm==4.66.5
+rich==13.8.1
+click==8.1.7
+pydantic
+langgraph
+langchain
+langchain-openai
+langchain-anthropic
