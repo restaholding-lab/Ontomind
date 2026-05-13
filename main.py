@@ -7,6 +7,9 @@ import os
 import uuid
 import time
 import asyncio
+import json as _json
+import re as _re
+import anthropic as _anthropic
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -54,6 +57,10 @@ class MensajeRequest(BaseModel):
 
 class SesionResponse(BaseModel):
     session_id: str
+
+class EvaluarRequest(BaseModel):
+    session_id: str
+    user_code:  str = "anonimo"
 
 
 # ─── Procesamiento en background ─────────────────────────
@@ -305,6 +312,140 @@ async def marcar_revisado(alerta_id: int):
             headers={"apikey": key, "Authorization": "Bearer " + key, "Content-Type": "application/json"},
             json={"revisado": True})
     return {"ok": r.status_code in (200, 204)}
+
+
+@app.post("/evaluar")
+async def evaluar_sesion(request: EvaluarRequest):
+    """
+    Evaluación final de sesión — llamada única al cierre desde el dashboard.
+    1. Recupera historial de Redis
+    2. Recupera reportes de nodos de Supabase (últimos 20 turnos)
+    3. Llama a Claude con PROMPT_EVALUADOR_CONVERSACION
+    4. Guarda resultado en evaluaciones_conversacion (Supabase)
+    5. Devuelve el dict de evaluación al frontend
+    """
+    import httpx as _httpx
+    from prompts import PROMPT_EVALUADOR_CONVERSACION
+
+    session_id = request.session_id
+    user_code  = request.user_code or "anonimo"
+
+    # ── 1. Historial de mensajes desde Redis ──────────────────────────────────
+    try:
+        mensajes     = await sesion_redis.get_mensajes(session_id)
+        sesion       = await sesion_redis.get(session_id)
+        total_turnos = sesion.get("turno_actual", len(mensajes) // 2)
+    except Exception as e:
+        print(f"[EVALUAR] Error Redis: {e}")
+        mensajes, total_turnos = [], 0
+
+    if not mensajes:
+        return {"error": "Sin historial", "score_condiciones": 0, "arco_detectado": "estable"}
+
+    historial_fmt = ""
+    turno_n = 0
+    for msg in mensajes:
+        rol      = msg.get("rol", "")
+        contenido = msg.get("contenido", "")
+        if rol == "user":
+            turno_n += 1
+            historial_fmt += f"\n[Turno {turno_n}]\nUsuario: {contenido}\n"
+        elif rol in ("agent", "assistant"):
+            historial_fmt += f"ONTOMIND: {contenido}\n"
+
+    # ── 2. Reportes acumulados de nodos desde Supabase ────────────────────────
+    reportes_fmt = ""
+    try:
+        supa_url = os.getenv("SUPABASE_URL", "").strip()
+        supa_key = os.getenv("SUPABASE_KEY", "").strip()
+        if supa_url and supa_key:
+            async with _httpx.AsyncClient(timeout=10) as client:
+                r = await client.get(
+                    f"{supa_url}/rest/v1/log_nodos"
+                    f"?session_id=eq.{session_id}&order=turno.asc&limit=20",
+                    headers={
+                        "apikey":        supa_key,
+                        "Authorization": f"Bearer {supa_key}",
+                    },
+                )
+            if r.status_code == 200:
+                for log in r.json():
+                    t   = log.get("turno", "?")
+                    vic = log.get("reporte_victima") or {}
+                    dic = log.get("dictamen") or {}
+                    qb  = log.get("reporte_quiebre") or {}
+                    reportes_fmt += (
+                        f"[T{t}] posicion={vic.get('posicion','?')} "
+                        f"quiebre={qb.get('tipo_quiebre','?')} "
+                        f"llave={dic.get('llave_maestra','?')} "
+                        f"riesgo={log.get('nivel_riesgo','ninguno')} "
+                        f"delta={log.get('delta_observador','estable')}\n"
+                    )
+    except Exception as e:
+        print(f"[EVALUAR] Error Supabase reportes: {e}")
+
+    if not reportes_fmt:
+        reportes_fmt = "Sin reportes de nodos disponibles."
+
+    # ── 3. Llamada a Claude ───────────────────────────────────────────────────
+    raw = ""
+    try:
+        client_ant = _anthropic.Anthropic(
+            api_key=os.getenv("ANTHROPIC_API_KEY", "").strip()
+        )
+        prompt_final = PROMPT_EVALUADOR_CONVERSACION.format(
+            historial           = historial_fmt.strip(),
+            reportes_acumulados = reportes_fmt.strip(),
+        )
+        response = client_ant.messages.create(
+            model      = "claude-sonnet-4-5",
+            max_tokens = 1200,
+            messages   = [{"role": "user", "content": prompt_final}],
+        )
+        raw        = response.content[0].text.strip()
+        raw        = _re.sub(r"^```json\s*", "", raw)
+        raw        = _re.sub(r"\s*```$",     "", raw)
+        evaluacion = _json.loads(raw)
+
+    except _json.JSONDecodeError as e:
+        print(f"[EVALUAR] JSON inválido: {e} | raw: {raw[:200]}")
+        evaluacion = _fallback_evaluacion()
+    except Exception as e:
+        print(f"[EVALUAR] Error Claude: {e}")
+        evaluacion = _fallback_evaluacion()
+
+    # ── 4. Guardar en Supabase ────────────────────────────────────────────────
+    try:
+        evaluacion["total_turnos"] = total_turnos
+        await mapa_observador.guardar_evaluacion_conversacion(
+            session_id, user_code, evaluacion
+        )
+    except Exception as e:
+        print(f"[EVALUAR] Error guardar: {e}")
+
+    print(f"[EVALUAR] {session_id[:8]} score={evaluacion.get('score_condiciones',0)} arco={evaluacion.get('arco_detectado','?')}")
+    return evaluacion
+
+
+def _fallback_evaluacion() -> dict:
+    """Evaluación neutra si Claude falla — el dashboard siempre muestra algo."""
+    return {
+        "posicion_inicial":       "mixto",
+        "posicion_final":         "mixto",
+        "arco_detectado":         "estable",
+        "score_condiciones":      25,
+        "posibilidad_nueva":      False,
+        "creencia_en_movimiento": "no",
+        "reconocimiento_quiebre": "ninguno",
+        "declaracion_detectada":  False,
+        "declaracion_texto":      "",
+        "semilla_plantada":       "no",
+        "llave_maestra_dominante":"—",
+        "nivel_riesgo_max":       "ninguno",
+        "recomendacion":          "",
+        "_fallback":              True,
+    }
+
 
 if __name__ == "__main__":
     import uvicorn
