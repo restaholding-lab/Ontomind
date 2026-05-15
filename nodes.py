@@ -5,6 +5,8 @@ Cada nodo recibe el estado, procesa y devuelve el estado actualizado.
 import os
 import json
 import asyncio
+import time
+import html as _html
 from typing import TypedDict, Optional
 
 import httpx
@@ -450,6 +452,129 @@ _FRASES_TERAPIA = [
 ]
 _PATRON_TERAPIA = _re.compile("|".join(_FRASES_TERAPIA), _re.IGNORECASE)
 
+
+# ─── Rate Limiter ─────────────────────────────────────────────
+# Máximo MAX_MSG mensajes por sesión en VENTANA segundos
+_RATE_STORE: dict = {}   # session_id → [timestamps]
+_RATE_MAX_MSG   = int(os.getenv("RATE_MAX_MSG",   "30"))   # 30 mensajes
+_RATE_VENTANA   = int(os.getenv("RATE_VENTANA",   "3600")) # por hora
+_RATE_MAX_TURNO = int(os.getenv("RATE_MAX_TURNO", "40"))   # tope absoluto por sesión
+
+def rate_check(session_id: str, turno_actual: int) -> bool:
+    """Devuelve True si la petición está PERMITIDA. False si excede el límite."""
+    # Tope absoluto de turnos por sesión
+    if turno_actual > _RATE_MAX_TURNO:
+        return False
+    now = time.time()
+    ventana_inicio = now - _RATE_VENTANA
+    historial = _RATE_STORE.get(session_id, [])
+    historial = [t for t in historial if t > ventana_inicio]
+    if len(historial) >= _RATE_MAX_MSG:
+        _RATE_STORE[session_id] = historial
+        return False
+    historial.append(now)
+    _RATE_STORE[session_id] = historial
+    return True
+
+
+# ─── Blacklist de términos prohibidos ─────────────────────────
+# Protege IP, privacidad y coherencia de marca.
+# Sustituye en la SALIDA del modelo (no en el input del usuario).
+_BLACKLIST_SUSTITUCION = [
+    # Nombres propios — autores y personajes del cómic Pinotti
+    (r'Pinotti',         'el coach',          True),
+    (r'Nicolás',         'él',                True),
+    (r'Nico',            'él',                True),
+    (r'Mogilevsky',      '',                  True),
+    (r'Herrera',         '',                  True),
+    (r'Viacava',         '',                  True),
+    # Filósofos, teóricos y autores — ninguno se nombra, sin excepción
+    (r'\x08Echeverría\x08',  '',  True),
+    (r'\x08Echeverria\x08',  '',  True),
+    (r'\x08Flores\x08',  '',  True),
+    (r'\x08Heidegger\x08',  '',  True),
+    (r'\x08Sartre\x08',  '',  True),
+    (r'\x08Frankl\x08',  '',  True),
+    (r'\x08Kahneman\x08',  '',  True),
+    (r'\x08Bateson\x08',  '',  True),
+    (r'\x08Wittgenstein\x08',  '',  True),
+    (r'\x08Maturana\x08',  '',  True),
+    (r'\x08Winograd\x08',  '',  True),
+    (r'\x08Aristóteles\x08',  '',  True),
+    (r'\x08Aristoteles\x08',  '',  True),
+    (r'\x08Platón\x08',  '',  True),
+    (r'\x08Platon\x08',  '',  True),
+    (r'\x08Sócrates\x08',  '',  True),
+    (r'\x08Socrates\x08',  '',  True),
+    (r'\x08Nietzsche\x08',  '',  True),
+    (r'\x08Foucault\x08',  '',  True),
+    (r'\x08Descartes\x08',  '',  True),
+    (r'\x08Kant\x08',  '',  True),
+    (r'\x08Spinoza\x08',  '',  True),
+    (r'\x08Derrida\x08',  '',  True),
+    (r'\x08Lacan\x08',  '',  True),
+    (r'\x08Freud\x08',  '',  True),
+    (r'\x08Jung\x08',  '',  True),
+    (r'\x08Buber\x08',  '',  True),
+    (r'\x08Arendt\x08',  '',  True),
+    (r'\x08Camus\x08',  '',  True),
+    (r'\x08Merleau-Ponty\x08',  '',  True),
+    (r'\x08Habermas\x08',  '',  True),
+    (r'\x08Austin\x08',  '',  True),
+    (r'\x08Searle\x08',  '',  True),
+    # Terminología académica → lenguaje cotidiano
+    (r'ontología',       'coaching',          True),
+    (r'ontológico',      'de crecimiento personal', True),
+    (r'ontológica',      'de crecimiento personal', True),
+    (r'ontológicos',     'de crecimiento personal', True),
+    (r'ontológicas',     'de crecimiento personal', True),
+    # Editorial
+    (r'Coaching Ediciones', '', True),
+]
+
+def aplicar_blacklist(texto: str) -> str:
+    """Elimina o sustituye términos prohibidos en la salida del modelo."""
+    import re as _re2
+    for patron, reemplazo, ignorar_case in _BLACKLIST_SUSTITUCION:
+        flags = _re2.IGNORECASE if ignorar_case else 0
+        texto = _re2.sub(patron, reemplazo, texto, flags=flags)
+    # Limpiar dobles espacios que puedan quedar tras eliminar palabras
+    texto = _re2.sub(r'  +', ' ', texto).strip()
+    return texto
+
+
+# ─── Sanitizador de input del usuario ─────────────────────────
+_PATRON_CODIGO = _re.compile(
+    r'```.*?```|`[^`]+`'                         # bloques de código markdown
+    r'|<[a-zA-Z][^>]{0,200}>.*?</[a-zA-Z]+>'     # etiquetas HTML
+    r'|<[a-zA-Z][^>]{0,200}/?>',                 # etiquetas HTML autocerradas
+    _re.DOTALL | _re.IGNORECASE
+)
+_PATRON_SCRIPTS  = _re.compile(r'<script[\s\S]*?</script>', _re.IGNORECASE)
+_PATRON_LINKS    = _re.compile(r'https?://\S+')
+
+def sanitizar_input(texto: str) -> str:
+    """
+    Limpia el input del usuario:
+    - Elimina bloques de código (```, <code>, <script>)
+    - Elimina etiquetas HTML
+    - Elimina URLs
+    - Decodifica entidades HTML
+    - Trunca a 2000 caracteres
+    Devuelve texto plano seguro.
+    """
+    texto = _PATRON_SCRIPTS.sub('', texto)
+    texto = _PATRON_CODIGO.sub('', texto)
+    texto = _PATRON_LINKS.sub('[enlace eliminado]', texto)
+    texto = _html.unescape(texto)           # &amp; → &, etc.
+    texto = _re.sub(r'[ \t]+', ' ', texto)  # espacios múltiples
+    texto = texto.strip()
+    # Truncar si es demasiado largo
+    if len(texto) > 2000:
+        texto = texto[:2000] + '…'
+    return texto
+
+
 def limpiar_respuesta_gpt(texto: str, user_input: str = "") -> str:
     """
     Post-procesado mecánico agresivo.
@@ -516,6 +641,9 @@ def limpiar_respuesta_gpt(texto: str, user_input: str = "") -> str:
     texto = _re.sub(r"\.\.", ".", texto)
     texto = texto.strip()
 
+    # Paso 5: aplicar blacklist de términos prohibidos
+    texto = aplicar_blacklist(texto)
+
     return texto
 
 
@@ -562,7 +690,16 @@ async def nodo_calibrar_escucha(state: OntomindState) -> OntomindState:
 # ─── NODO 1: Clasificar Input ────────────────────────────
 async def nodo_clasificar_input(state: OntomindState) -> OntomindState:
     """Detecta si el input es silencio/mínimo o normal."""
-    texto  = state["user_input"].strip()
+    # Sanitizar y verificar rate limit
+    texto_raw = sanitizar_input(state.get("user_input", ""))
+    state["user_input"] = texto_raw
+
+    if not rate_check(state.get("session_id", ""), state.get("turno_actual", 1)):
+        state["respuesta"] = "—He notado que llevamos mucho tiempo juntos en esta sesión. Tómate un respiro — aquí seguimos cuando quieras volver."
+        state["protocolo"] = "normal"
+        return state
+
+    texto  = texto_raw.strip()
     tokens = texto.split()
 
     tokens_silencio = {"no sé", "no se", "no lo sé", "quizás", "tal vez",
@@ -1406,6 +1543,11 @@ async def nodo_evaluador_conversacion(state: OntomindState) -> OntomindState:
     Evalúa el arco completo de la conversación tras cada turno.
     Score 0-100 según el Eje de Transformación del observador.
     """
+    # Solo evaluar cada 3 turnos — evita overflow de contexto en sesiones largas
+    turno_ev = state.get("turno_actual", 1)
+    if turno_ev % 3 != 0 and turno_ev != 1:
+        return state
+
     try:
         # Recuperar historial completo de la sesión
         mensajes = await sesion_redis.get_mensajes(state["session_id"])
