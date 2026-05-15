@@ -755,14 +755,27 @@ async def nodo_clasificar_input(state: OntomindState) -> OntomindState:
         len(tokens) <= 4 and any(s in texto_lower for s in ["hola", "hey", "buenas", "hi", "buenas tardes", "buenos días"])
     )
 
-    # Pregunta de identidad — contiene alguna señal aunque sea frase larga
-    es_pregunta_identidad = any(p in texto_lower for p in PALABRAS_IDENTIDAD)
+    # Pregunta de identidad — la señal debe aparecer en mensajes cortos (<150 chars)
+    # o al inicio del mensaje, para evitar falsos positivos en frases largas
+    # donde "que obtengo", "que gano" etc. forman parte de un relato personal.
+    _texto_corto = len(texto) < 150
+    _IDENTIDAD_SOLO_CORTO = {
+        "que obtengo", "qué obtengo", "que obtendre", "qué obtendré",
+        "que gano", "qué gano", "de que me valdra", "de qué me valdrá",
+        "para que me sirve", "para qué me sirve",
+        "que puedo encontrar", "qué puedo encontrar",
+        "que puedo hacer", "qué puedo hacer",
+        "que se hace", "qué se hace",
+    }
+    es_pregunta_identidad = any(
+        p in texto_lower
+        for p in PALABRAS_IDENTIDAD
+        if p not in _IDENTIDAD_SOLO_CORTO or _texto_corto
+    )
 
-    # Si el primer turno tiene saludo + pregunta de identidad → identidad tiene prioridad
-    # Mantener protocolo apertura durante los primeros 3 turnos si hay confusión
+    # identidad solo aplica en los primeros 2 turnos — después el usuario ya sabe dónde está
     turno_actual    = state.get("turno_actual", 1)
-    # Mantener apertura hasta 5 turnos si el usuario sigue confundido
-    es_primer_turno = turno_actual <= 5
+    es_primer_turno = turno_actual <= 2
 
     es_silencio = (
         (len(tokens) < 4 or texto.lower() in tokens_silencio or len(texto) < 10)
