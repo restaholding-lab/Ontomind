@@ -849,7 +849,9 @@ async def nodo_clasificar_input(state: OntomindState) -> OntomindState:
             # El usuario ignora la oferta → flujo normal
             pass
 
-    if es_pregunta_identidad or (es_primer_turno and es_saludo):
+    if (es_pregunta_identidad and es_primer_turno) or (es_primer_turno and es_saludo):
+        # Identidad/saludo SOLO en turnos 1-2 — después, "no entiendo"
+        # es frustración legítima, no confusión sobre el servicio
         state["protocolo"] = "identidad" if es_pregunta_identidad else "saludo"
     elif es_saludo:
         state["protocolo"] = "saludo"
