@@ -834,8 +834,18 @@ async def nodo_clasificar_input(state: OntomindState) -> OntomindState:
     )
 
     # ── Detección de elección de lead magnet tras oferta ──
-    ELIGE_CREENCIA = ["creencia", "desmontar", "lo segundo", "la segunda", "segunda opción"]
-    ELIGE_ESPEJO   = ["espejo", "ceguera", "lo primero", "la primera", "primera opción", "descubrir"]
+    ELIGE_CREENCIA = [
+        "creencia", "desmontar", "lo segundo", "la segunda", "segunda opción",
+        "adelante con las preguntas", "las preguntas", "con las preguntas",
+        "preguntas", "adelante", "empieza", "empezamos", "por las preguntas",
+        "el segundo", "segunda", "desmonta", "quiero las preguntas",
+        "hazme las preguntas", "haz las preguntas", "vamos con las preguntas",
+    ]
+    ELIGE_ESPEJO = [
+        "espejo", "ceguera", "lo primero", "la primera", "primera opción",
+        "descubrir", "el primero", "primera", "quiero descubrir",
+        "descúbreme", "muéstrame", "la ceguera", "ver lo que no veo",
+    ]
 
     es_respuesta_lead = lead_state.get("tipo") == "oferta_hecha"
     if es_respuesta_lead:
@@ -1247,6 +1257,29 @@ async def nodo_maestro(state: OntomindState) -> OntomindState:
     turno     = state.get("turno_actual", 1)
 
     # ── Lead Magnets ──────────────────────────────────────────
+    if protocolo == "reubicacion":
+        # El usuario señaló que el sistema está en loop.
+        # Forzar una reubicación: observación sin pregunta, o pregunta radicalmente diferente.
+        user_input = state.get("user_input", "")
+        mensajes   = state.get("mensajes_historial", [])
+        contexto = "El usuario ha señalado que las respuestas anteriores se repiten.\n"
+        contexto += "Tu siguiente respuesta DEBE ser una reubicación: una observación\n"
+        contexto += "que cambie el terreno completamente. Sin pregunta, o con una pregunta\n"
+        contexto += "radicalmente distinta a las anteriores.\n"
+        contexto += "Trátale como alguien que acaba de mostrar consciencia real de lo que ocurre.\n"
+        contexto += "Eso es un momento de apertura, no de corrección.\n\n"
+        if mensajes:
+            for m in mensajes[-6:]:
+                rol = "Usuario" if m.get("rol") == "user" else "ONTOMIND"
+                contexto += f"{rol}: {m.get('contenido','')[:200]}\n"
+        contexto += f"Usuario ahora: {user_input}"
+        respuesta_raw = await llamar_claude(
+            PROMPT_MAESTRO, contexto,
+            temperatura=0.8, max_tokens=500
+        )
+        state["respuesta"] = limpiar_respuesta_gpt(respuesta_raw, user_input)
+        return state
+
     if protocolo == "lead_oferta":
         from prompts import PROMPT_LEAD_OFERTA
         user_input = state.get("user_input", "")
@@ -1351,7 +1384,7 @@ async def nodo_maestro(state: OntomindState) -> OntomindState:
 
     # ── Detección de fase conversacional ──────────────────
     # Solo si no es un protocolo especial
-    if protocolo not in ("vigil", "saludo", "identidad", "lead_oferta", "lead_espejo", "lead_creencia"):
+    if protocolo not in ("vigil", "saludo", "identidad", "lead_oferta", "lead_espejo", "lead_creencia", "reubicacion"):
         fase = await detectar_fase_conversacion(state)
 
         if fase == "encuentro":
