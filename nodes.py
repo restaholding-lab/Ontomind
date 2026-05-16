@@ -684,6 +684,29 @@ async def nodo_calibrar_escucha(state: OntomindState) -> OntomindState:
     except Exception:
         state["mensajes_historial"] = []
 
+
+    # ── Cargar resumen de sesión anterior ──
+    user_code_cal = state.get("user_code", "anonimo")
+    if user_code_cal != "anonimo" and state.get("turno_actual", 1) == 1:
+        try:
+            import httpx as _httpx_cal
+            supa_url = os.getenv("SUPABASE_URL", "").strip()
+            supa_key = os.getenv("SUPABASE_KEY", "").strip()
+            if supa_url and supa_key:
+                async with _httpx_cal.AsyncClient(timeout=8) as client_cal:
+                    r = await client_cal.get(
+                        f"{supa_url}/rest/v1/usuarios"
+                        f"?user_code=eq.{user_code_cal}&select=ultimo_resumen&limit=1",
+                        headers={"apikey": supa_key, "Authorization": f"Bearer {supa_key}"},
+                    )
+                if r.status_code == 200:
+                    data_cal = r.json()
+                    if data_cal and data_cal[0].get("ultimo_resumen"):
+                        state["resumen_sesion_anterior"] = data_cal[0]["ultimo_resumen"]
+                        print(f"[MEMORIA] Resumen cargado para {user_code_cal}")
+        except Exception as e:
+            print(f"[MEMORIA] Error cargando resumen: {e}")
+
     return state
 
 
@@ -755,27 +778,14 @@ async def nodo_clasificar_input(state: OntomindState) -> OntomindState:
         len(tokens) <= 4 and any(s in texto_lower for s in ["hola", "hey", "buenas", "hi", "buenas tardes", "buenos días"])
     )
 
-    # Pregunta de identidad — la señal debe aparecer en mensajes cortos (<150 chars)
-    # o al inicio del mensaje, para evitar falsos positivos en frases largas
-    # donde "que obtengo", "que gano" etc. forman parte de un relato personal.
-    _texto_corto = len(texto) < 150
-    _IDENTIDAD_SOLO_CORTO = {
-        "que obtengo", "qué obtengo", "que obtendre", "qué obtendré",
-        "que gano", "qué gano", "de que me valdra", "de qué me valdrá",
-        "para que me sirve", "para qué me sirve",
-        "que puedo encontrar", "qué puedo encontrar",
-        "que puedo hacer", "qué puedo hacer",
-        "que se hace", "qué se hace",
-    }
-    es_pregunta_identidad = any(
-        p in texto_lower
-        for p in PALABRAS_IDENTIDAD
-        if p not in _IDENTIDAD_SOLO_CORTO or _texto_corto
-    )
+    # Pregunta de identidad — contiene alguna señal aunque sea frase larga
+    es_pregunta_identidad = any(p in texto_lower for p in PALABRAS_IDENTIDAD)
 
-    # identidad solo aplica en los primeros 2 turnos — después el usuario ya sabe dónde está
+    # Si el primer turno tiene saludo + pregunta de identidad → identidad tiene prioridad
+    # Mantener protocolo apertura durante los primeros 3 turnos si hay confusión
     turno_actual    = state.get("turno_actual", 1)
-    es_primer_turno = turno_actual <= 2
+    # Mantener apertura hasta 5 turnos si el usuario sigue confundido
+    es_primer_turno = turno_actual <= 5
 
     es_silencio = (
         (len(tokens) < 4 or texto.lower() in tokens_silencio or len(texto) < 10)
@@ -784,13 +794,56 @@ async def nodo_clasificar_input(state: OntomindState) -> OntomindState:
         and not es_pregunta_identidad
     )
 
+    # ── Lead Magnet: si hay protocolo creencia activo, mantenerlo ──
+    sesion_data = await sesion_redis.get(state.get("session_id", ""))
+    lead_state  = sesion_data.get("lead_magnet", {})
+
+    if lead_state.get("tipo") == "creencia" and lead_state.get("ronda", 0) < 5:
+        state["protocolo"] = "lead_creencia"
+        return state
+
+    # ── Detección de lead_oferta: mensaje vago/de prueba en turno 1 ──
+    PALABRAS_VAGO = [
+        "a ver", "vamos a ver", "probar", "probando", "solo quería probar",
+        "solo queria probar", "a ver qué tal", "a ver que tal",
+        "no sé qué poner", "no se que poner", "no tengo claro",
+        "pues nada", "no sé", "no se", "a ver qué pasa", "voy a probar",
+        "quiero probar", "quiero ver", "estoy curioseando",
+    ]
+    es_vago = (
+        turno_actual <= 2
+        and not es_pregunta_identidad
+        and not tiene_contenido_emocional
+        and (
+            any(p in texto_lower for p in PALABRAS_VAGO)
+            or (len(texto) < 40 and not es_saludo and len(tokens) > 1)
+        )
+    )
+
+    # ── Detección de elección de lead magnet tras oferta ──
+    ELIGE_CREENCIA = ["creencia", "desmontar", "lo segundo", "la segunda", "segunda opción"]
+    ELIGE_ESPEJO   = ["espejo", "ceguera", "lo primero", "la primera", "primera opción", "descubrir"]
+
+    es_respuesta_lead = lead_state.get("tipo") == "oferta_hecha"
+    if es_respuesta_lead:
+        if any(p in texto_lower for p in ELIGE_CREENCIA):
+            state["protocolo"] = "lead_creencia"
+            return state
+        elif any(p in texto_lower for p in ELIGE_ESPEJO):
+            state["protocolo"] = "lead_espejo"
+            return state
+        else:
+            # El usuario ignora la oferta → flujo normal
+            pass
+
     if es_pregunta_identidad or (es_primer_turno and es_saludo):
-        # Primer turno con saludo o pregunta sobre el sistema → apertura
         state["protocolo"] = "identidad" if es_pregunta_identidad else "saludo"
     elif es_saludo:
         state["protocolo"] = "saludo"
     elif es_silencio:
         state["protocolo"] = "silencio"
+    elif es_vago:
+        state["protocolo"] = "lead_oferta"
     else:
         state["protocolo"] = "normal"
     return state
@@ -1178,6 +1231,77 @@ async def nodo_maestro(state: OntomindState) -> OntomindState:
     protocolo = state["protocolo"]
     turno     = state.get("turno_actual", 1)
 
+    # ── Lead Magnets ──────────────────────────────────────────
+    if protocolo == "lead_oferta":
+        from prompts import PROMPT_LEAD_OFERTA
+        user_input = state.get("user_input", "")
+        respuesta_raw = await llamar_claude(
+            PROMPT_LEAD_OFERTA,
+            f"El usuario dice: {user_input}",
+            temperatura=0.7, max_tokens=300
+        )
+        state["respuesta"] = limpiar_respuesta_gpt(respuesta_raw, user_input)
+        # Marcar que la oferta fue hecha
+        sesion_data = await sesion_redis.get(state["session_id"])
+        sesion_data["lead_magnet"] = {"tipo": "oferta_hecha"}
+        await sesion_redis.set(state["session_id"], sesion_data)
+        return state
+
+    if protocolo == "lead_espejo":
+        from prompts import PROMPT_ESPEJO
+        user_input = state.get("user_input", "")
+        mensajes   = state.get("mensajes_historial", [])
+        contexto = ""
+        if mensajes:
+            for m in mensajes[-4:]:
+                rol = "Usuario" if m.get("rol") == "user" else "Coach"
+                contexto += f"{rol}: {m.get('contenido','')}" + "\n"
+        contexto += f"Input actual: {user_input}"
+        respuesta_raw = await llamar_claude(
+            PROMPT_ESPEJO, contexto,
+            temperatura=0.7, max_tokens=400
+        )
+        state["respuesta"] = limpiar_respuesta_gpt(respuesta_raw, user_input)
+        # Marcar espejo completado
+        sesion_data = await sesion_redis.get(state["session_id"])
+        sesion_data["lead_magnet"] = {"tipo": "espejo", "completado": True}
+        await sesion_redis.set(state["session_id"], sesion_data)
+        return state
+
+    if protocolo == "lead_creencia":
+        from prompts import PROMPT_CREENCIA
+        user_input = state.get("user_input", "")
+        sesion_data = await sesion_redis.get(state["session_id"])
+        lead_state  = sesion_data.get("lead_magnet", {})
+        ronda = lead_state.get("ronda", 0) + 1
+        creencia = lead_state.get("creencia", "")
+        mensajes = state.get("mensajes_historial", [])
+        contexto = f"RONDA {ronda} DE 5\n"
+        if creencia:
+            contexto += f"Creencia identificada: {creencia}\n"
+        contexto += "HISTORIAL RECIENTE:\n"
+        if mensajes:
+            for m in mensajes[-6:]:
+                rol = "Usuario" if m.get("rol") == "user" else "Coach"
+                contexto += f"{rol}: {m.get('contenido','')}" + "\n"
+        contexto += f"Input actual: {user_input}"
+        respuesta_raw = await llamar_claude(
+            PROMPT_CREENCIA, contexto,
+            temperatura=0.7, max_tokens=400
+        )
+        state["respuesta"] = limpiar_respuesta_gpt(respuesta_raw, user_input)
+        # Actualizar estado del lead magnet
+        if ronda == 1 and user_input:
+            creencia = user_input[:200]
+        sesion_data["lead_magnet"] = {
+            "tipo": "creencia",
+            "ronda": ronda,
+            "creencia": creencia,
+            "completado": ronda >= 5,
+        }
+        await sesion_redis.set(state["session_id"], sesion_data)
+        return state
+
     # Protocolo SALUDO/IDENTIDAD — apertura conversacional con LLM
     if protocolo in ("saludo", "identidad"):
         from prompts import (PROMPT_APERTURA, APERTURAS_PRIMER_CONTACTO,
@@ -1211,7 +1335,7 @@ async def nodo_maestro(state: OntomindState) -> OntomindState:
 
     # ── Detección de fase conversacional ──────────────────
     # Solo si no es un protocolo especial
-    if protocolo not in ("vigil", "saludo", "identidad"):
+    if protocolo not in ("vigil", "saludo", "identidad", "lead_oferta", "lead_espejo", "lead_creencia"):
         fase = await detectar_fase_conversacion(state)
 
         if fase == "encuentro":
@@ -1668,6 +1792,45 @@ async def nodo_actualizar_memoria(state: OntomindState) -> OntomindState:
         await mapa_observador.guardar_evaluacion(
             state["session_id"], state["turno_actual"], state["evaluacion"]
         )
+    # ── Guardar resumen breve para memoria entre sesiones ──
+    turno_mem = state.get("turno_actual", 1)
+    user_code_mem = state.get("user_code", "anonimo")
+    if turno_mem % 5 == 0 and user_code_mem != "anonimo":
+        try:
+            from prompts import PROMPT_RESUMEN_SESION
+            mensajes_mem = await sesion_redis.get_mensajes(state["session_id"])
+            historial_mem = ""
+            for m in mensajes_mem[-10:]:
+                rol_m = "Usuario" if m.get("rol") == "user" else "ONTOMIND"
+                historial_mem += f"{rol_m}: {m.get('contenido','')[:200]}\n"
+            resumen = await llamar_llm(
+                PROMPT_RESUMEN_SESION,
+                historial_mem,
+                temperatura=0.3,
+                forzar_openai=True
+            )
+            import httpx as _httpx_mem
+            supa_url = os.getenv("SUPABASE_URL", "").strip()
+            supa_key = os.getenv("SUPABASE_KEY", "").strip()
+            if supa_url and supa_key:
+                async with _httpx_mem.AsyncClient(timeout=10) as client_mem:
+                    await client_mem.post(
+                        f"{supa_url}/rest/v1/usuarios",
+                        headers={
+                            "apikey": supa_key,
+                            "Authorization": f"Bearer {supa_key}",
+                            "Content-Type": "application/json",
+                            "Prefer": "resolution=merge-duplicates",
+                        },
+                        json={
+                            "user_code": user_code_mem,
+                            "ultimo_resumen": resumen[:500],
+                        },
+                    )
+                print(f"[RESUMEN] Guardado para {user_code_mem}: {resumen[:80]}...")
+        except Exception as e:
+            print(f"[RESUMEN] Error: {e}")
+
     if state.get("evaluacion_conversacion"):
         await mapa_observador.guardar_evaluacion_conversacion(
             state["session_id"], state.get("user_code","anonimo"),
