@@ -778,14 +778,27 @@ async def nodo_clasificar_input(state: OntomindState) -> OntomindState:
         len(tokens) <= 4 and any(s in texto_lower for s in ["hola", "hey", "buenas", "hi", "buenas tardes", "buenos días"])
     )
 
-    # Pregunta de identidad — contiene alguna señal aunque sea frase larga
-    es_pregunta_identidad = any(p in texto_lower for p in PALABRAS_IDENTIDAD)
+    # Pregunta de identidad — señales ambiguas solo activan en mensajes cortos (<150 chars)
+    _texto_corto = len(texto) < 150
+    _IDENTIDAD_SOLO_CORTO = {
+        "que obtengo", "qué obtengo", "que obtendre", "qué obtendré",
+        "que gano", "qué gano", "de que me valdra", "de qué me valdrá",
+        "para que me sirve", "para qué me sirve",
+        "que puedo encontrar", "qué puedo encontrar",
+        "que puedo hacer", "qué puedo hacer",
+        "que se hace", "qué se hace",
+    }
+    es_pregunta_identidad = any(
+        p in texto_lower
+        for p in PALABRAS_IDENTIDAD
+        if p not in _IDENTIDAD_SOLO_CORTO or _texto_corto
+    )
 
     # Si el primer turno tiene saludo + pregunta de identidad → identidad tiene prioridad
     # Mantener protocolo apertura durante los primeros 3 turnos si hay confusión
     turno_actual    = state.get("turno_actual", 1)
-    # Mantener apertura hasta 5 turnos si el usuario sigue confundido
-    es_primer_turno = turno_actual <= 5
+    # identidad solo en los 2 primeros turnos
+    es_primer_turno = turno_actual <= 2
 
     es_silencio = (
         (len(tokens) < 4 or texto.lower() in tokens_silencio or len(texto) < 10)
@@ -1316,13 +1329,14 @@ async def nodo_maestro(state: OntomindState) -> OntomindState:
             # LLM responde naturalmente a la pregunta real del usuario
             refuerzo_id = (
                 "\n\nRECORDATORIO: NUNCA abrir con 'Entiendo', 'Parece que', "
-                "'Es comprensible'. Habla como persona, no como servicio."
+                "'Es comprensible'. Habla como persona, no como servicio. "
+                "NUNCA 'estoy aquí para escucharte'. NUNCA dar consejos."
             )
-            respuesta_raw = await llamar_llm(
+            respuesta_raw = await llamar_claude(
                 PROMPT_APERTURA + refuerzo_id,
                 f"El usuario dice: {user_input}",
                 temperatura=0.7,
-                forzar_openai=True
+                max_tokens=400
             )
             state["respuesta"] = limpiar_respuesta_gpt(respuesta_raw, user_input)
         elif es_usuario_conocido:
