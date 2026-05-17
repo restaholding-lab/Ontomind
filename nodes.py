@@ -800,6 +800,17 @@ async def nodo_clasificar_input(state: OntomindState) -> OntomindState:
     # identidad solo en los 2 primeros turnos
     es_primer_turno = turno_actual <= 2
 
+    # Lenguaje de muerte o colapso psicológico → siempre Claude, siempre nombrar
+    DOLOR_AGUDO_LEXICON = [
+        "tumba", "me mata", "me destruye", "me aplasta", "me ahoga",
+        "no puedo más", "al límite", "derrumbado", "hundido", "roto",
+        "vacío total", "sin salida", "agotado de verdad", "perdido del todo",
+        "no quiero seguir", "no tiene sentido mi vida", "para qué vivir",
+    ]
+    es_dolor_agudo_profundo = any(p in texto_lower for p in DOLOR_AGUDO_LEXICON)
+    if es_dolor_agudo_profundo:
+        state["protocolo"] = "dolor_agudo"
+
     es_silencio = (
         (len(tokens) < 4 or texto.lower() in tokens_silencio or len(texto) < 10)
         and not tiene_contenido_emocional
@@ -998,6 +1009,20 @@ async def nodo_triple_filtro_vigil(state: OntomindState) -> OntomindState:
         "independencia", "mi propia imagen", "tratar como un niño",
         "como a un niño", "no me dejan", "quiero ser",
     }
+    # FILTRO: cierres filosóficos/cognitivos nunca son crisis
+    CIERRES_FILOSOFICOS = {
+        "eso no va a ocurrir", "no va a ocurrir", "no ocurrirá",
+        "no lo veo posible", "no creo en eso", "es imposible cambiar",
+        "nunca cambiará", "da igual", "para qué",
+        "no tiene sentido seguir", "no cambiará nada",
+    }
+    es_cierre_filosofico = any(p in texto_lower for p in CIERRES_FILOSOFICOS)
+    if es_cierre_filosofico:
+        # Cierre cognitivo: máximo latente, nunca crítico ni alto
+        if nivel in ("alto", "critico"):
+            nivel = "latente"
+            print("[VIGIL] Cierre filosófico — reducido a latente")
+
     # Si el mensaje contiene tokens de falso positivo, reducir nivel máximo a latente
     es_falso_positivo = any(t in texto for t in tokens_falso_positivo)
 
@@ -1257,6 +1282,31 @@ async def nodo_maestro(state: OntomindState) -> OntomindState:
     turno     = state.get("turno_actual", 1)
 
     # ── Lead Magnets ──────────────────────────────────────────
+    if protocolo == "dolor_agudo":
+        from prompts import PROMPT_ENCUENTRO
+        user_input = state.get("user_input", "")
+        mensajes   = state.get("mensajes_historial", [])
+        contexto_dolor = (
+            "El usuario acaba de expresar dolor psicológico profundo con lenguaje muy intenso.\n"
+            "TU ÚNICA FUNCIÓN AHORA: nombrar el dolor antes de cualquier otra cosa.\n"
+            "No preguntes. No explores. Primero nombra lo que está viviendo\n"
+            "como alguien que lo ve y lo sostiene, no como alguien que lo analiza.\n"
+            "Trátale como alguien que da todo porque lo que hace le importa de verdad.\n"
+            "Después de nombrar, UNA sola pregunta suave que abra desde el sostenimiento,\n"
+            "no desde la confrontación.\n\n"
+        )
+        if mensajes:
+            for m in mensajes[-4:]:
+                rol = "Usuario" if m.get("rol") == "user" else "ONTOMIND"
+                contexto_dolor += f"{rol}: {m.get('contenido','')[:200]}\n"
+        contexto_dolor += f"Usuario ahora: {user_input}"
+        respuesta_raw = await llamar_claude(
+            PROMPT_ENCUENTRO, contexto_dolor,
+            temperatura=0.7, max_tokens=500
+        )
+        state["respuesta"] = limpiar_respuesta_gpt(respuesta_raw, user_input)
+        return state
+
     if protocolo == "reubicacion":
         # El usuario señaló que el sistema está en loop.
         # Forzar una reubicación: observación sin pregunta, o pregunta radicalmente diferente.
@@ -1384,7 +1434,7 @@ async def nodo_maestro(state: OntomindState) -> OntomindState:
 
     # ── Detección de fase conversacional ──────────────────
     # Solo si no es un protocolo especial
-    if protocolo not in ("vigil", "saludo", "identidad", "lead_oferta", "lead_espejo", "lead_creencia", "reubicacion"):
+    if protocolo not in ("vigil", "saludo", "identidad", "lead_oferta", "lead_espejo", "lead_creencia", "reubicacion", "dolor_agudo"):
         fase = await detectar_fase_conversacion(state)
 
         if fase == "encuentro":
