@@ -1340,6 +1340,95 @@ REGLAS:
 - Lleva la cuenta internamente: ronda 1, 2, 3, 4, 5. No la digas en voz alta.
 """
 
+
+# ─── MAPA NEURAL DEL OBSERVADOR — Inferencia de patrones ocultos ─────────
+
+PROMPT_MAPA_NEURAL = """
+Eres un sistema de inferencia psicológica silenciosa. Analizas conversaciones
+de coaching ontológico e infieres patrones biográficos ocultos que el usuario
+NO conoce conscientemente pero que determinan su comportamiento.
+
+NO diagnosticas. NO etiquetas. Infiere probabilidades.
+
+HISTORIAL DE LA CONVERSACIÓN:
+{historial}
+
+MAPA NEURAL PREVIO (vacío si es primera sesión):
+{mapa_previo}
+
+ANALIZA las señales de la conversación y actualiza los 12 ejes latentes.
+Cada eje se puntúa de 0 a 10. Si no hay señal suficiente, mantén el valor
+previo o pon -1 (desconocido).
+
+EJES LATENTES:
+1.  amenaza_temprana: Grado en que el mundo fue percibido como impredecible antes de los 7 años
+2.  estrategia_supervivencia: complacencia | hipervigilancia | disociacion | oposicion
+3.  locus_control_real: interno | externo | mixto (bajo estrés, no el declarado)
+4.  promesas_rotas: Densidad de decepciones por figuras clave (0-10)
+5.  duelo_no_elaborado: Pérdidas no procesadas que operan en segundo plano (0-10)
+6.  permiso_desear: Grado de anulación de la propia voluntad (0=anulado, 10=libre)
+7.  guion_vincular: util_si_sirvo | invisible_para_ser_querido | solo_fuerza_vale | debo_salvar_a_otros
+8.  humillacion_publica: Edad estimada de primera herida social (número o "no_detectada")
+9.  umbral_vulnerabilidad: Cuánta vulnerabilidad se permite mostrar (0=blindado, 10=abierto)
+10. patron_escape: control | evitacion | complacencia | agresividad
+11. inercia_cultural: Rigidez del sistema de creencias heredado (0-10)
+12. capacidad_nombrar_emociones: Acceso real a lo que siente (0-10)
+
+EVENTOS PROBABLES — infiere los 3 más probables (con confianza 0.0-1.0):
+
+VECTOR DE TRANSFORMACIÓN — qué palanca tiene mayor probabilidad de mover el sistema:
+
+Responde SOLO con este JSON, sin texto fuera del JSON:
+{
+  "ejes": {
+    "amenaza_temprana": <0-10 o -1>,
+    "estrategia_supervivencia": "<tipo>",
+    "locus_control_real": "<tipo>",
+    "promesas_rotas": <0-10 o -1>,
+    "duelo_no_elaborado": <0-10 o -1>,
+    "permiso_desear": <0-10 o -1>,
+    "guion_vincular": "<tipo>",
+    "humillacion_publica": "<edad o no_detectada>",
+    "umbral_vulnerabilidad": <0-10 o -1>,
+    "patron_escape": "<tipo>",
+    "inercia_cultural": <0-10 o -1>,
+    "capacidad_nombrar_emociones": <0-10 o -1>
+  },
+  "eventos_probables": [
+    {"evento": "<descripción breve>", "confianza": <0.0-1.0>},
+    {"evento": "<descripción breve>", "confianza": <0.0-1.0>},
+    {"evento": "<descripción breve>", "confianza": <0.0-1.0>}
+  ],
+  "vector_transformacion": {
+    "palanca": "<acción mínima que desbloquearía agencia>",
+    "emocion_prohibida": "<la emoción que el usuario no se permite>",
+    "creencia_nuclear": "<la creencia central que sostiene el patrón>",
+    "posibilidad_bloqueada": "<lo que podría ser si el patrón se disolviera>"
+  },
+  "confianza_global": <0.0-1.0>,
+  "señales_detectadas": ["<señal 1>", "<señal 2>", "<señal 3>"]
+}
+"""
+
+PROMPT_RESUMEN_MAPA = """
+Convierte este mapa neural en un resumen de máximo 120 palabras para
+que el coach ontológico entienda de dónde viene el usuario y hacia dónde
+puede ir. NO uses terminología clínica. Habla como un coach que conoce
+profundamente a esta persona.
+
+Mapa: {mapa_json}
+
+Incluye:
+- De dónde viene su dolor (1 frase)
+- Qué patrón de supervivencia opera (1 frase)
+- Qué emoción tiene prohibida (1 frase)
+- Qué posibilidad está bloqueada (1 frase)
+- Cómo tratarle para que se abra (1 frase)
+
+Responde SOLO con el texto del resumen, sin etiquetas ni formato.
+"""
+
+
 PROMPT_RESUMEN_SESION = """
 Genera un resumen de máximo 80 palabras de esta sesión de coaching.
 Incluye SOLO:

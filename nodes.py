@@ -685,9 +685,20 @@ async def nodo_calibrar_escucha(state: OntomindState) -> OntomindState:
         state["mensajes_historial"] = []
 
 
-    # ── Cargar resumen de sesión anterior ──
+    # ── Cargar mapa neural + resumen de sesión anterior ──
     user_code_cal = state.get("user_code", "anonimo")
     if user_code_cal != "anonimo" and state.get("turno_actual", 1) == 1:
+        try:
+            mapa = await cargar_mapa_neural(user_code_cal)
+            if mapa:
+                state["mapa_neural"] = mapa
+                resumen_mapa = await resumir_mapa_neural(mapa)
+                if resumen_mapa:
+                    state["resumen_mapa_neural"] = resumen_mapa
+                    print(f"[MAPA-NEURAL] Cargado para {user_code_cal}: {resumen_mapa[:80]}...")
+        except Exception as e:
+            print(f"[MAPA-NEURAL] Error carga: {e}")
+
         try:
             import httpx as _httpx_cal
             supa_url = os.getenv("SUPABASE_URL", "").strip()
@@ -708,6 +719,126 @@ async def nodo_calibrar_escucha(state: OntomindState) -> OntomindState:
             print(f"[MEMORIA] Error cargando resumen: {e}")
 
     return state
+
+
+
+# ─── MAPA NEURAL — Funciones de inferencia biográfica ─────────
+
+async def cargar_mapa_neural(user_code: str) -> dict:
+    """Carga el mapa neural desde Supabase. Devuelve dict vacío si no existe."""
+    if not user_code or user_code == "anonimo":
+        return {}
+    try:
+        import httpx as _hx
+        supa_url = os.getenv("SUPABASE_URL", "").strip()
+        supa_key = os.getenv("SUPABASE_KEY", "").strip()
+        if not supa_url:
+            return {}
+        async with _hx.AsyncClient(timeout=8) as cl:
+            r = await cl.get(
+                f"{supa_url}/rest/v1/usuarios"
+                f"?user_code=eq.{user_code}&select=mapa_neural&limit=1",
+                headers={"apikey": supa_key, "Authorization": f"Bearer {supa_key}"},
+            )
+        if r.status_code == 200:
+            data = r.json()
+            if data and data[0].get("mapa_neural"):
+                return data[0]["mapa_neural"] if isinstance(data[0]["mapa_neural"], dict) else {}
+    except Exception as e:
+        print(f"[MAPA-NEURAL] Error cargando: {e}")
+    return {}
+
+
+async def guardar_mapa_neural(user_code: str, mapa: dict):
+    """Guarda el mapa neural en Supabase."""
+    if not user_code or user_code == "anonimo":
+        return
+    try:
+        import httpx as _hx
+        supa_url = os.getenv("SUPABASE_URL", "").strip()
+        supa_key = os.getenv("SUPABASE_KEY", "").strip()
+        if not supa_url:
+            return
+        async with _hx.AsyncClient(timeout=8) as cl:
+            await cl.post(
+                f"{supa_url}/rest/v1/usuarios",
+                headers={
+                    "apikey": supa_key,
+                    "Authorization": f"Bearer {supa_key}",
+                    "Content-Type": "application/json",
+                    "Prefer": "resolution=merge-duplicates",
+                },
+                json={"user_code": user_code, "mapa_neural": mapa},
+            )
+        print(f"[MAPA-NEURAL] Guardado para {user_code}")
+    except Exception as e:
+        print(f"[MAPA-NEURAL] Error guardando: {e}")
+
+
+async def actualizar_mapa_neural(state: dict) -> dict:
+    """Infiere y actualiza el mapa neural desde la conversación actual."""
+    from prompts import PROMPT_MAPA_NEURAL
+    user_code = state.get("user_code", "anonimo")
+    if user_code == "anonimo":
+        return state.get("mapa_neural", {})
+
+    mapa_previo = state.get("mapa_neural", {})
+    mensajes = await sesion_redis.get_mensajes(state.get("session_id", ""))
+
+    historial = ""
+    for m in mensajes[-8:]:
+        rol = "Usuario" if m.get("rol") == "user" else "ONTOMIND"
+        historial += f"{rol}: {m.get('contenido', '')[:250]}\n"
+
+    if not historial.strip():
+        return mapa_previo
+
+    import json as _json_map
+    mapa_str = _json_map.dumps(mapa_previo, ensure_ascii=False) if mapa_previo else "{}"
+
+    prompt = PROMPT_MAPA_NEURAL.format(
+        historial=historial.strip(),
+        mapa_previo=mapa_str,
+    )
+
+    try:
+        respuesta = await llamar_llm(
+            prompt, "", temperatura=0.3, forzar_openai=True
+        )
+        respuesta = _re.sub(r"^```json\s*", "", respuesta.strip())
+        respuesta = _re.sub(r"\s*```$", "", respuesta)
+        nuevo_mapa = _json_map.loads(respuesta)
+
+        # Merge: mantener valores previos donde el nuevo pone -1
+        if mapa_previo.get("ejes") and nuevo_mapa.get("ejes"):
+            for eje, val in nuevo_mapa["ejes"].items():
+                if val == -1 and eje in mapa_previo["ejes"]:
+                    nuevo_mapa["ejes"][eje] = mapa_previo["ejes"][eje]
+
+        await guardar_mapa_neural(user_code, nuevo_mapa)
+        print(f"[MAPA-NEURAL] Actualizado — confianza: {nuevo_mapa.get('confianza_global', '?')}")
+        return nuevo_mapa
+
+    except Exception as e:
+        print(f"[MAPA-NEURAL] Error inferencia: {e}")
+        return mapa_previo
+
+
+async def resumir_mapa_neural(mapa: dict) -> str:
+    """Genera un resumen de ~120 palabras del mapa para inyectar en el Maestro."""
+    if not mapa or not mapa.get("ejes"):
+        return ""
+    from prompts import PROMPT_RESUMEN_MAPA
+    import json as _json_res
+    try:
+        resumen = await llamar_llm(
+            PROMPT_RESUMEN_MAPA.format(mapa_json=_json_res.dumps(mapa, ensure_ascii=False)),
+            "", temperatura=0.3, forzar_openai=True
+        )
+        return resumen.strip()
+    except Exception as e:
+        print(f"[MAPA-NEURAL] Error resumen: {e}")
+        return ""
 
 
 # ─── NODO 1: Clasificar Input ────────────────────────────
@@ -1587,6 +1718,14 @@ async def nodo_maestro(state: OntomindState) -> OntomindState:
         f"dominio={dominio_q}\n\n"
     )
 
+    # Inyectar mapa neural si existe (silencioso para el usuario)
+    resumen_mapa = state.get("resumen_mapa_neural", "")
+    if resumen_mapa:
+        contexto_maestro += (
+            f"MAPA DEL USUARIO (usa como lente silenciosa, NO menciones):\n"
+            f"{resumen_mapa}\n\n"
+        )
+
     # Añadir historial conversacional para memoria
     mensajes_hist = state.get("mensajes_historial", [])
     if mensajes_hist:
@@ -1891,9 +2030,20 @@ async def nodo_actualizar_memoria(state: OntomindState) -> OntomindState:
         await mapa_observador.guardar_evaluacion(
             state["session_id"], state["turno_actual"], state["evaluacion"]
         )
-    # ── Guardar resumen breve para memoria entre sesiones ──
+    # ── Actualizar mapa neural cada 3 turnos ──
     turno_mem = state.get("turno_actual", 1)
     user_code_mem = state.get("user_code", "anonimo")
+    if turno_mem % 3 == 0 and user_code_mem != "anonimo":
+        try:
+            mapa_actualizado = await actualizar_mapa_neural(state)
+            state["mapa_neural"] = mapa_actualizado
+            resumen_nuevo = await resumir_mapa_neural(mapa_actualizado)
+            if resumen_nuevo:
+                state["resumen_mapa_neural"] = resumen_nuevo
+        except Exception as e:
+            print(f"[MAPA-NEURAL] Error actualización: {e}")
+
+    # ── Guardar resumen breve para memoria entre sesiones ──
     if turno_mem % 5 == 0 and user_code_mem != "anonimo":
         try:
             from prompts import PROMPT_RESUMEN_SESION
