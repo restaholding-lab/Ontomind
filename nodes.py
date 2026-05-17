@@ -1147,7 +1147,7 @@ async def nodo_triple_filtro_vigil(state: OntomindState) -> OntomindState:
         "nunca cambiará", "da igual", "para qué",
         "no tiene sentido seguir", "no cambiará nada",
     }
-    es_cierre_filosofico = any(p in texto_lower for p in CIERRES_FILOSOFICOS)
+    es_cierre_filosofico = any(p in texto for p in CIERRES_FILOSOFICOS)
     if es_cierre_filosofico:
         # Cierre cognitivo: máximo latente, nunca crítico ni alto
         if nivel in ("alto", "critico"):
