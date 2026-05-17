@@ -1139,6 +1139,12 @@ async def nodo_triple_filtro_vigil(state: OntomindState) -> OntomindState:
         # Adolescentes — expresiones normales de desarrollo
         "independencia", "mi propia imagen", "tratar como un niño",
         "como a un niño", "no me dejan", "quiero ser",
+        # Aspiracionales — respuestas positivas, NO son crisis
+        "autonomía", "paz", "desapego", "autoconocimiento",
+        "conexión con uno mismo", "conexión conmigo",
+        "libertad", "sabiduría", "tranquilidad", "plenitud",
+        "ermitaño", "soledad elegida", "mi camino",
+        "ser yo mismo", "encontrarme", "crecer",
     }
     # FILTRO: cierres filosóficos/cognitivos nunca son crisis
     CIERRES_FILOSOFICOS = {
@@ -1812,6 +1818,28 @@ async def nodo_maestro(state: OntomindState) -> OntomindState:
         + seccion_ref
         + instruccion_presencia
     )
+    # ── Detección de loop de preguntas — forzar Claude si Mistral repite ──
+    mensajes_previos = state.get("mensajes_historial", [])
+    respuestas_previas = [
+        m.get("contenido", "")[:30] for m in mensajes_previos
+        if m.get("rol") in ("agent", "assistant")
+    ][-4:]  # últimas 4 respuestas
+    preguntas_similares = sum(
+        1 for r in respuestas_previas
+        if r.strip().startswith(("—¿Y quién", "—¿Y qué", "—¿Quién", "¿Y quién", "¿Y qué"))
+    )
+    forzar_claude_por_loop = preguntas_similares >= 2
+    if forzar_claude_por_loop:
+        contexto_maestro += (
+            "\n\nALERTA DE LOOP — Las últimas respuestas son preguntas similares.\n"
+            "OBLIGATORIO: haz una REUBICACIÓN. Una observación con cuerpo que\n"
+            "cambie el terreno. Que el usuario sienta que alguien le ve, no que\n"
+            "alguien le interroga. Mínimo 3 frases antes de cualquier pregunta.\n"
+            "Trata al usuario como alguien que ya tiene la respuesta dentro —\n"
+            "tu función es que la vea, no que la busque respondiendo más preguntas."
+        )
+        print(f"[MAESTRO] Loop detectado ({preguntas_similares} preguntas similares) → forzando reubicación")
+
     # Few-shots dinámicos según perfil
     pos_vic   = state["reporte_victima"].get("posicion", "mixto")
     llave_fs  = state.get("dictamen", {}).get("llave_maestra", "")
@@ -1820,12 +1848,21 @@ async def nodo_maestro(state: OntomindState) -> OntomindState:
     shots     = seleccionar_few_shots(perfil_fs, llave_fs, state.get("user_input", ""))
     print(f"[FEW-SHOTS] Perfil: {perfil_fs} | Llave: {llave_fs[:30]} | Shots: {len(shots)}")
 
-    respuesta_raw = await llamar_llm_con_shots(
-        prompt_maestro_enriquecido,
-        contexto_maestro,
-        few_shots=shots,
-        perfil=perfil_fs,
-    )
+    # Si hay loop de preguntas, usar Claude directamente (Mistral tiende al loop)
+    if forzar_claude_por_loop:
+        respuesta_raw = await llamar_claude(
+            prompt_maestro_enriquecido,
+            contexto_maestro,
+            temperatura=0.8,
+            max_tokens=500,
+        )
+    else:
+        respuesta_raw = await llamar_llm_con_shots(
+            prompt_maestro_enriquecido,
+            contexto_maestro,
+            few_shots=shots,
+            perfil=perfil_fs,
+        )
     # Post-procesado: eliminar aperturas prohibidas si GPT-4o-mini es fallback
     state["respuesta"] = limpiar_respuesta_gpt(respuesta_raw, state.get("user_input", ""))
     return state
