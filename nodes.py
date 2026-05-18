@@ -954,7 +954,23 @@ async def nodo_clasificar_input(state: OntomindState) -> OntomindState:
     lead_state  = sesion_data.get("lead_magnet", {})
 
     if lead_state.get("tipo") == "creencia" and lead_state.get("ronda", 0) < 5:
-        state["protocolo"] = "lead_creencia"
+        # Válvula de escape: si el usuario empuja contra el protocolo, salir
+        RECHAZO_CREENCIA = [
+            "no entiendo", "no lo veo", "no sé por qué", "no sé porque",
+            "me llevas a lo que no es", "no tiene sentido",
+            "no estoy de acuerdo", "eso no es así", "por qué va a ser falsa",
+            "porque va a ser falsa", "camino diferente", "no me convence",
+            "esto no funciona", "no es una creencia", "es una certeza",
+            "te estoy dando casos", "son hechos",
+        ]
+        if any(p in texto_lower for p in RECHAZO_CREENCIA):
+            # El usuario rechaza el protocolo → volver a encuentro normal
+            sesion_data["lead_magnet"] = {"tipo": "creencia_abandonada"}
+            await sesion_redis.set(state.get("session_id", ""), sesion_data)
+            state["protocolo"] = "normal"
+            print("[LEAD] Creencia abandonada por rechazo del usuario")
+        else:
+            state["protocolo"] = "lead_creencia"
         return state
 
     # ── Detección de lead_oferta: mensaje vago/de prueba en turno 1 ──
@@ -965,10 +981,31 @@ async def nodo_clasificar_input(state: OntomindState) -> OntomindState:
         "pues nada", "no sé", "no se", "a ver qué pasa", "voy a probar",
         "quiero probar", "quiero ver", "estoy curioseando",
     ]
+    # Señales que BLOQUEAN lead_oferta — contenido real, no tanteo
+    PERSONAS_MENCIONADAS = [
+        "hermano", "hermana", "padre", "madre", "mamá", "papá",
+        "pareja", "novio", "novia", "marido", "mujer", "esposa", "esposo",
+        "hijo", "hija", "hijos", "jefe", "compañero", "amigo", "amiga",
+        "familia", "ex ", "suegra", "suegro", "cuñado", "cuñada",
+        "colega", "socio", "profesor", "vecino",
+    ]
+    EMOCIONES_DIRECTAS = [
+        "me siento", "siento que", "me duele", "me frustra", "me angustia",
+        "tengo miedo", "me da rabia", "estoy harto", "me agobia",
+        "no puedo más", "me cuesta", "no sé cómo", "me preocupa",
+        "discutiendo", "discutimos", "peleamos", "conflicto",
+        "soledad", "solo", "sola", "triste", "ansioso", "ansiosa",
+        "relación", "no hablamos", "no me habla", "no le hablo",
+    ]
+    tiene_persona    = any(p in texto_lower for p in PERSONAS_MENCIONADAS)
+    tiene_emocion    = any(e in texto_lower for e in EMOCIONES_DIRECTAS)
+    tiene_situacion  = tiene_persona or tiene_emocion or len(texto) > 100
+
     es_vago = (
         turno_actual <= 2
         and not es_pregunta_identidad
         and not tiene_contenido_emocional
+        and not tiene_situacion
         and (
             any(p in texto_lower for p in PALABRAS_VAGO)
             or (len(texto) < 40 and not es_saludo and len(tokens) > 1)
