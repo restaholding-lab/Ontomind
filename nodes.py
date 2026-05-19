@@ -1885,21 +1885,25 @@ async def nodo_maestro(state: OntomindState) -> OntomindState:
     shots     = seleccionar_few_shots(perfil_fs, llave_fs, state.get("user_input", ""))
     print(f"[FEW-SHOTS] Perfil: {perfil_fs} | Llave: {llave_fs[:30]} | Shots: {len(shots)}")
 
-    # Si hay loop de preguntas, usar Claude directamente (Mistral tiende al loop)
-    if forzar_claude_por_loop:
-        respuesta_raw = await llamar_claude(
-            prompt_maestro_enriquecido,
-            contexto_maestro,
-            temperatura=0.8,
-            max_tokens=500,
-        )
-    else:
-        respuesta_raw = await llamar_llm_con_shots(
-            prompt_maestro_enriquecido,
-            contexto_maestro,
-            few_shots=shots,
-            perfil=perfil_fs,
-        )
+    # ══════════════════════════════════════════════════════════
+    # TEMPORALMENTE: Claude para todo hasta reentrenar Mistral
+    # Mistral 7B DPO v5 repite "¿Y quién serías si...?" en loop.
+    # Cuando el dataset v6 (cómic + mapa neural) esté listo,
+    # reactivar Mistral para intervención: descomentar el bloque else.
+    # ══════════════════════════════════════════════════════════
+    respuesta_raw = await llamar_claude(
+        prompt_maestro_enriquecido,
+        contexto_maestro,
+        temperatura=0.7,
+        max_tokens=500,
+    )
+    # REACTIVAR MISTRAL CUANDO ESTÉ REENTRENADO:
+    # respuesta_raw = await llamar_llm_con_shots(
+    #     prompt_maestro_enriquecido,
+    #     contexto_maestro,
+    #     few_shots=shots,
+    #     perfil=perfil_fs,
+    # )
     # Post-procesado: eliminar aperturas prohibidas si GPT-4o-mini es fallback
     state["respuesta"] = limpiar_respuesta_gpt(respuesta_raw, state.get("user_input", ""))
     return state
